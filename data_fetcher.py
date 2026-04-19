@@ -7,23 +7,22 @@ import pytz
 
 BASE_URL = "https://api.dhan.co/v2/charts/intraday"
 
-# ================= MARKET TIME CHECK =================
+
+# ================= MARKET TIME =================
 def is_market_open():
     ist = pytz.timezone("Asia/Kolkata")
     now = datetime.now(ist)
 
-    # Weekday check (Mon-Fri)
     if now.weekday() >= 5:
         return False
 
-    # Time check (9:15 to 15:30)
-    market_start = now.replace(hour=9, minute=15, second=0)
-    market_end = now.replace(hour=15, minute=30, second=0)
+    start = now.replace(hour=9, minute=15, second=0)
+    end = now.replace(hour=15, minute=30, second=0)
 
-    return market_start <= now <= market_end
+    return start <= now <= end
 
 
-# ================= DHAN FETCH =================
+# ================= DHAN =================
 def fetch_dhan(symbol, interval):
     try:
         token = st.secrets["dhan"]["token"]
@@ -88,16 +87,13 @@ def fetch_dhan(symbol, interval):
         return None
 
 
-# ================= YFINANCE FETCH =================
+# ================= YFINANCE =================
 def fetch_yfinance(symbol, interval):
     try:
-        market_open = is_market_open()
-
-        # 🔥 SMART SWITCH
-        if market_open:
+        if is_market_open():
             period = "1d"
         else:
-            period = "5d"   # night safe
+            period = "5d"
 
         df = yf.download(
             tickers=symbol,
@@ -109,7 +105,6 @@ def fetch_yfinance(symbol, interval):
         if df is None or df.empty:
             return None
 
-        # Fix columns
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [col[0].lower() for col in df.columns]
         else:
@@ -128,27 +123,36 @@ def get_data(symbol, interval):
 
     market_open = is_market_open()
 
-    # 🔥 STATUS SHOW
+    # STATUS
     if market_open:
-        st.success("🟢 Market Open Mode (Live Data)")
+        st.success("🟢 Market Open Mode")
     else:
-        st.warning("🌙 Market Closed Mode (Auto Adjusted Data)")
+        st.warning("🌙 Market Closed Mode")
 
-    df = None
+    # 🔥 INDEX → ALWAYS YFINANCE
+    if symbol.startswith("^"):
+        df = fetch_yfinance(symbol, interval)
 
-    # Dhan only for stocks
-    if not symbol.startswith("^") and market_open:
-        df = fetch_dhan(symbol, interval)
-
-        if df is not None and not df.empty:
-            st.success("⚡ Data from Dhan API")
+        if df is not None:
+            st.info("📊 Index data from yfinance")
             return df
 
-    # Fallback always works
+        st.error("❌ Index data failed")
+        return None
+
+    # 🔥 STOCK → TRY DHAN
+    if market_open:
+        df = fetch_dhan(symbol, interval)
+
+        if df is not None:
+            st.success("⚡ Data from Dhan")
+            return df
+
+    # 🔥 FALLBACK
     df = fetch_yfinance(symbol, interval)
 
-    if df is not None and not df.empty:
-        st.info("📊 Data from yfinance")
+    if df is not None:
+        st.warning("⚠️ Using fallback (yfinance)")
         return df
 
     st.error("❌ Data fetch failed")
