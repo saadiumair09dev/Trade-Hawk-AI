@@ -4,62 +4,63 @@ import pandas as pd
 # ===== CONFIG =====
 BASE_URL = "https://api.dhan.co/v2/charts/intraday"
 
-token = "PASTE_YOUR_TOKEN_HERE"
-client_id = "1106554867"
+TOKEN = "PASTE_YOUR_TOKEN_HERE"
+CLIENT_ID = "1106554867"
 
 HEADERS = {
-    "access-token": token,
-    "client-id": client_id,
+    "access-token": TOKEN,
     "Content-Type": "application/json"
 }
 
-# ===== SYMBOL MAPPING =====
+# ===== SYMBOL MAP =====
 SYMBOL_MAP = {
-    "^NSEI": {
-        "securityId": "13",        # NIFTY 50
-        "exchangeSegment": "IDX_I"
-    },
-    "^NSEBANK": {
-        "securityId": "25",        # BANKNIFTY
-        "exchangeSegment": "IDX_I"
-    }
+    "^NSEI": "13",       # NIFTY
+    "^NSEBANK": "25"     # BANKNIFTY
+}
+
+# ===== INTERVAL MAP =====
+INTERVAL_MAP = {
+    "1m": "1",
+    "5m": "5",
+    "15m": "15"
 }
 
 # ===== MAIN FUNCTION =====
 def get_data(symbol, interval):
     try:
-        if symbol not in SYMBOL_MAP:
-            raise Exception("Symbol not supported for Dhan")
+        security_id = SYMBOL_MAP.get(symbol)
+        interval_val = INTERVAL_MAP.get(interval, "5")
 
-        mapping = SYMBOL_MAP[symbol]
+        if not security_id:
+            raise Exception("Unsupported symbol")
 
         payload = {
-            "securityId": mapping["securityId"],
-            "exchangeSegment": mapping["exchangeSegment"],
+            "securityId": security_id,
+            "exchangeSegment": "IDX_I",
             "instrument": "INDEX",
-            "interval": interval,
-            "fromDate": "2024-04-01",
-            "toDate": "2026-04-20"
+            "interval": interval_val
         }
 
-        res = requests.post(BASE_URL, json=payload, headers=HEADERS)
+        response = requests.post(BASE_URL, json=payload, headers=HEADERS)
 
-        if res.status_code != 200:
-            raise Exception(res.text)
+        if response.status_code != 200:
+            raise Exception(response.text)
 
-        data = res.json()
+        data = response.json()
 
-        df = pd.DataFrame(data["data"])
+        # 👇 Important: correct key
+        candles = data.get("data", [])
+
+        if not candles:
+            raise Exception("No data returned")
+
+        df = pd.DataFrame(candles)
+
+        # rename columns
+        df.columns = ["datetime", "open", "high", "low", "close", "volume"]
 
         df["datetime"] = pd.to_datetime(df["datetime"])
         df.set_index("datetime", inplace=True)
-
-        df.rename(columns={
-            "open": "Open",
-            "high": "High",
-            "low": "Low",
-            "close": "Close"
-        }, inplace=True)
 
         return df
 
