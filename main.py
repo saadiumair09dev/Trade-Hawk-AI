@@ -1,16 +1,19 @@
 import streamlit as st
+import pandas as pd
+
+# ===== IMPORTS =====
 from data.dhan_api import get_data
 from indicators.indicators import add_indicators
 
+# ===== UI =====
 st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
 st.title("📈 Trade Hawk AI")
 
-# ================= INPUT =================
-symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY", "^FINNIFTY"])
+symbol = st.selectbox("Select Index", ["^NSEI", "^NSEBANK"])
 interval = st.selectbox("Timeframe", ["5m", "15m", "1h"])
 
-# ================= DATA =================
+# ===== DATA =====
 df = get_data(symbol, interval)
 
 if df is None or df.empty:
@@ -19,26 +22,40 @@ if df is None or df.empty:
 
 st.success("✅ Data Loaded")
 
-# ================= INDICATORS =================
+# ===== INDICATORS =====
 df = add_indicators(df)
 
-if df is None or df.empty:
+if df is None:
     st.error("❌ Indicator calculation failed")
     st.stop()
 
-st.success("✅ Indicators Ready")
+# ===== DEBUG (IMPORTANT) =====
+# uncomment if needed
+# st.write(df.columns)
 
-# ================= DEBUG =================
-st.subheader("Last Data")
-st.dataframe(df.tail())
+# ===== SIGNAL LOGIC (SAFE) =====
+if "EMA_9" not in df.columns or "EMA_21" not in df.columns:
+    st.error("❌ EMA not found in data")
+    st.stop()
 
-# ================= SIMPLE SIGNAL =================
-signal = "NO TRADE"
+last = df.iloc[-1]
 
-if df["EMA_9"].iloc[-1] > df["EMA_21"].iloc[-1] and df["Rsi"].iloc[-1] > 50:
+signal = "HOLD"
+
+if last["EMA_9"] > last["EMA_21"]:
     signal = "BUY"
-elif df["EMA_9"].iloc[-1] < df["EMA_21"].iloc[-1] and df["Rsi"].iloc[-1] < 50:
+elif last["EMA_9"] < last["EMA_21"]:
     signal = "SELL"
 
+# ===== OUTPUT =====
 st.subheader("Signal")
-st.write(signal)
+
+if signal == "BUY":
+    st.success("🟢 BUY Signal")
+elif signal == "SELL":
+    st.error("🔴 SELL Signal")
+else:
+    st.info("⚪ HOLD")
+
+# ===== SHOW DATA =====
+st.dataframe(df.tail(10))
