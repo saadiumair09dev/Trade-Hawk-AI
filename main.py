@@ -1,90 +1,100 @@
 import streamlit as st
-import yfinance as yf
 import pandas as pd
-import time
+import requests
+import yfinance as yf
 import streamlit.components.v1 as components
 
-st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
+st.set_page_config(page_title="Trade Hawk AI LIVE", layout="wide")
 
 # ================= SESSION =================
 if "sound_enabled" not in st.session_state:
     st.session_state.sound_enabled = False
-
 if "last_signal" not in st.session_state:
     st.session_state.last_signal = None
 
-if "last_alert_time" not in st.session_state:
-    st.session_state.last_alert_time = 0
-
-# ================= TOGGLE =================
+# ================= SOUND =================
 def toggle_sound():
     st.session_state.sound_enabled = not st.session_state.sound_enabled
 
 with st.sidebar:
-    st.button(
-        "🔊 Sound ON" if st.session_state.sound_enabled else "🔇 Sound OFF",
-        on_click=toggle_sound
-    )
+    st.button("🔊 Sound ON/OFF", on_click=toggle_sound)
 
 # ================= VOICE =================
 def voice_alert(text):
     if not st.session_state.sound_enabled:
         return
-
     components.html(f"""
     <script>
     var msg = new SpeechSynthesisUtterance("{text}");
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(msg);
-
     if (navigator.vibrate) {{
         navigator.vibrate([200,100,200]);
     }}
     </script>
     """, height=0)
 
-# ================= TEST =================
 if st.sidebar.button("▶️ Test Voice"):
     st.session_state.sound_enabled = True
-    voice_alert("System ready. Voice working")
+    voice_alert("System ready")
 
-# ================= DATA =================
-@st.cache_data(ttl=60)
-def get_data(symbol, tf):
+# ================= DHAN DATA =================
+def get_dhan_data(security_id="13", interval="5"):
     try:
-        df = yf.download(symbol, period="5d", interval=tf)
+        token = st.secrets["dhan"]["token"]
+        client_id = st.secrets["dhan"]["client_id"]
 
+        url = "https://api.dhan.co/v2/charts/intraday"
+
+        payload = {
+            "securityId": security_id,
+            "exchangeSegment": "IDX_I",
+            "interval": interval
+        }
+
+        headers = {
+            "access-token": token,
+            "client-id": client_id,
+            "Content-Type": "application/json"
+        }
+
+        res = requests.post(url, json=payload, headers=headers)
+        data = res.json()
+
+        if "data" not in data:
+            return None
+
+        df = pd.DataFrame(data["data"])
+
+        df.rename(columns={
+            "open": "Open",
+            "high": "High",
+            "low": "Low",
+            "close": "Close",
+            "volume": "Volume"
+        }, inplace=True)
+
+        return df
+
+    except Exception as e:
+        st.error(f"Dhan Error: {e}")
+        return None
+
+# ================= YAHOO BACKUP =================
+def get_backup():
+    try:
+        df = yf.download("^NSEI", period="5d", interval="5m")
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = df.columns.get_level_values(0)
-
         return df
     except:
         return None
 
-# ================= GIFT =================
-def get_gift_bias():
-    try:
-        df = yf.download("^NSEI", period="1d", interval="5m")
-
-        if df is None or df.empty:
-            return "UNKNOWN"
-
-        if isinstance(df.columns, pd.MultiIndex):
-            df.columns = df.columns.get_level_values(0)
-
-        change = df["Close"].iloc[-1] - df["Close"].iloc[-10]
-
-        if change > 30:
-            return "BULLISH"
-        elif change < -30:
-            return "BEARISH"
-        else:
-            return "SIDEWAYS"
-    except:
-        return "UNKNOWN"
-
 # ================= INDICATORS =================
 def add_indicators(df):
+    if df is None or df.empty:
+        return df
+
     df["EMA20"] = df["Close"].ewm(span=20).mean()
 
     delta = df["Close"].diff()
@@ -93,135 +103,125 @@ def add_indicators(df):
     rs = gain / loss
     df["RSI"] = 100 - (100/(1+rs))
 
+    df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
+
     return df.dropna()
 
-# ================= ADVANCED SIGNAL =================
-def advanced_signal(df):
-    if df is None or df.empty or len(df) < 30:
+# ================= SIGNAL LOGIC =================
+def ai_signal(df):
+    if df is None or len(df) < 20:
         return "NO DATA"
+    last = df.iloc[-1]
+    if last["Close"] > last["EMA20"] and last["RSI"] > 60:
+        return "BUY"
+    elif last["Close"] < last["EMA20"] and last["RSI"] < 40:
+        return "SELL"
+    return "NO TRADE"
 
+def gap_signal(df):
+    if df is None or len(df) < 20:
+        return "WAIT"
+
+    prev_close = df["Close"].iloc[-20]
+    open_price = df["Open"].iloc[-1]
+    gap = open_price - prev_close
+
+    orb_high = df["High"].iloc[-3:].max()
+    orb_low = df["Low"].iloc[-3:].min()
     last = df.iloc[-1]
 
-    ema20 = last["EMA20"]
-    price = last["Close"]
-    rsi = last["RSI"]
+    if gap > 80:
+        if last["Close"] > orb_high and last["Close"] > last["VWAP"]:
+            return "BUY"
+        elif last["Close"] < orb_low and last["Close"] < last["VWAP"]:
+            return "SELL"
 
-    trend_strength = abs(df["EMA20"].iloc[-1] - df["EMA20"].iloc[-5])
-    atr = (df["High"] - df["Low"]).rolling(14).mean().iloc[-1]
+    elif gap < -80:
+        if last["Close"] < orb_low and last["Close"] < last["VWAP"]:
+            return "SELL"
+        elif last["Close"] > orb_high and last["Close"] > last["VWAP"]:
+            return "BUY"
 
-    if atr < 5:
-        return "NO TRADE"
+    return "WAIT"
 
-    if trend_strength < 2:
-        return "NO TRADE"
+def liquidity(df):
+    if df is None or len(df) < 10:
+        return None
+    last = df.iloc[-1]
+    prev_high = df["High"].iloc[-6:-1].max()
+    prev_low = df["Low"].iloc[-6:-1].min()
 
-    if price > ema20 and rsi > 60:
-        return "BUY"
-    elif price < ema20 and rsi < 40:
+    if last["High"] > prev_high and last["Close"] < prev_high:
         return "SELL"
-    else:
-        return "NO TRADE"
+    if last["Low"] < prev_low and last["Close"] > prev_low:
+        return "BUY"
+    return None
 
-# ================= SPIKE =================
-def detect_spike(df):
-    if df is None or len(df) < 5:
+def fake_breakout(df):
+    if df is None or len(df) < 3:
         return False
-
     last = df.iloc[-1]
     prev = df.iloc[-2]
 
-    move = abs(last["Close"] - prev["Close"])
-    candle = last["High"] - last["Low"]
-
-    return move > 80 or candle > 120
-
-# ================= CRASH =================
-def market_crash_guard(df):
-    if len(df) < 10:
-        return False
-
-    move = df["Close"].iloc[-1] - df["Close"].iloc[-10]
-
-    return abs(move) > 150
-
-# ================= GIFT FILTER =================
-def gift_filter(signal, bias):
-    if bias == "UNKNOWN":
+    if last["High"] > prev["High"] and last["Close"] < prev["High"]:
         return True
+    if last["Low"] < prev["Low"] and last["Close"] > prev["Low"]:
+        return True
+    return False
 
-    if signal == "BUY" and bias != "BULLISH":
+def spike(df):
+    if df is None or len(df) < 3:
         return False
-
-    if signal == "SELL" and bias != "BEARISH":
-        return False
-
-    return True
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+    return abs(last["Close"] - prev["Close"]) > 80
 
 # ================= MAIN =================
-st.title("🦅 Trade Hawk AI PRO")
+st.title("🦅 Trade Hawk AI LIVE (Dhan Powered)")
 
-symbol = "^NSEI"
-tf = "5m"
-
-df = get_data(symbol, tf)
+df = get_dhan_data("13")
 
 if df is None or df.empty:
-    st.error("❌ No data")
+    st.warning("Using backup data...")
+    df = get_backup()
+
+if df is None or df.empty:
+    st.error("No data available")
     st.stop()
 
 df = add_indicators(df)
 
-if df.empty:
+if df is None or df.empty:
     st.stop()
 
-signal = advanced_signal(df)
-price = df["Close"].iloc[-1]
+ai = ai_signal(df)
+gap = gap_signal(df)
+liq = liquidity(df)
+fake = fake_breakout(df)
+spk = spike(df)
 
-gift_bias = get_gift_bias()
+final = "NO TRADE"
 
-spike = detect_spike(df)
-crash = market_crash_guard(df)
+if fake:
+    st.warning("Fake breakout detected")
 
-# ================= FILTER =================
-if spike:
-    st.warning("⚠️ Spike detected")
-    signal = "NO TRADE"
+elif spk:
+    st.error("Spike detected")
 
-if crash:
-    st.error("🚨 Market crash/pump")
-    signal = "NO TRADE"
+elif liq:
+    final = liq
 
-if not gift_filter(signal, gift_bias):
-    st.info("Filtered by global bias")
-    signal = "NO TRADE"
+elif ai == gap:
+    final = ai
 
-# ================= DISPLAY =================
-st.metric("Signal", signal)
-st.metric("Price", f"{price:.2f}")
-st.metric("GIFT Bias", gift_bias)
+# ================= UI =================
+st.metric("FINAL SIGNAL", final)
+st.metric("AI SIGNAL", ai)
+st.metric("GAP SIGNAL", gap)
 
 st.line_chart(df["Close"])
 
 # ================= ALERT =================
-now = time.time()
-
-if signal in ["BUY", "SELL"]:
-
-    if (signal != st.session_state.last_signal) or (now - st.session_state.last_alert_time > 60):
-
-        if st.session_state.sound_enabled:
-            voice_alert(f"{signal} signal confirmed. Market stable")
-
-        st.session_state.last_signal = signal
-        st.session_state.last_alert_time = now
-
-        st.success(f"{signal} TRADE")
-
-elif spike:
-    voice_alert("Warning. Market spike detected")
-
-elif crash:
-    voice_alert("Danger. Market crash detected")
-
-else:
-    st.info("No Trade")
+if final in ["BUY", "SELL"] and final != st.session_state.last_signal:
+    voice_alert(f"{final} trade detected")
+    st.session_state.last_signal = final
