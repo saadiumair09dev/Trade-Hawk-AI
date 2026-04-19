@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import base64
 import datetime
+import os
 from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
@@ -14,16 +15,20 @@ if "sound_enabled" not in st.session_state:
 if "last_signal" not in st.session_state:
     st.session_state.last_signal = None
 
+if "trade_log" not in st.session_state:
+    st.session_state.trade_log = []
+
 # ================= SOUND =================
 def play_sound(file):
     try:
-        with open(file, "rb") as f:
-            b64 = base64.b64encode(f.read()).decode()
-        st.markdown(f"""
-        <audio autoplay>
-        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-        </audio>
-        """, unsafe_allow_html=True)
+        if os.path.exists(file):
+            with open(file, "rb") as f:
+                b64 = base64.b64encode(f.read()).decode()
+            st.markdown(f"""
+                <audio autoplay>
+                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+                </audio>
+            """, unsafe_allow_html=True)
     except:
         pass
 
@@ -61,7 +66,6 @@ def prepare_ml(df):
 
     X = df[["RSI", "ema_diff", "volatility"]]
     y = df["target"]
-
     return X, y
 
 @st.cache_resource
@@ -79,7 +83,6 @@ def predict(model, df):
         return 0.5
 
     last = df.iloc[-1]
-
     try:
         X = [[
             last["RSI"],
@@ -104,6 +107,25 @@ def get_signal(df, prob):
     else:
         return "NO TRADE"
 
+# ================= FILTER =================
+def live_filter(df, prob):
+    last = df.iloc[-1]
+
+    if prob < 0.6:
+        return False
+
+    if abs(last["EMA20"] - last["EMA50"]) < 2:
+        return False
+
+    return True
+
+# ================= RISK =================
+def risk_control(balance, price):
+    risk_per_trade = 0.01
+    sl = price * 0.98
+    qty = int((balance * risk_per_trade) / (price - sl)) if price != sl else 0
+    return qty, sl
+
 # ================= UI =================
 st.title("🦅 Trade Hawk AI PRO")
 
@@ -117,7 +139,6 @@ with st.sidebar:
 # ================= MAIN =================
 df = get_data(symbol, tf)
 
-# 🔥 CRITICAL FIX
 if df is None or df.empty:
     st.error("⚠️ Data not available (Rate limit / Market closed)")
     st.stop()
@@ -130,13 +151,12 @@ if df.empty:
 
 model = train_model(df)
 prob = predict(model, df)
-
 signal = get_signal(df, prob)
 
 price = df["Close"].iloc[-1]
 strike = round(price / 100) * 100
 
-# ================= UI DISPLAY =================
+# ================= DISPLAY =================
 col1, col2, col3 = st.columns(3)
 col1.metric("Signal", signal)
 col2.metric("AI Confidence", f"{prob:.2f}")
@@ -144,12 +164,38 @@ col3.metric("ATM Strike", strike)
 
 st.line_chart(df["Close"])
 
-# ================= SOUND =================
-if signal != st.session_state.last_signal:
-    if st.session_state.sound_enabled:
-        if signal == "BUY":
-            play_sound("buy.mp3")
-        elif signal == "SELL":
-            play_sound("sell.mp3")
+# ================= EXECUTION =================
+balance = 10000
 
-    st.session_state.last_signal = signal
+if signal in ["BUY", "SELL"] and live_filter(df, prob):
+
+    qty, sl = risk_control(balance, price)
+
+    st.success(f"{signal} ORDER | Price: {price:.2f} | Qty: {qty} | SL: {sl:.2f}")
+
+    # Sound only on new signal
+    if signal != st.session_state.last_signal:
+        if st.session_state.sound_enabled:
+            if signal == "BUY":
+                play_sound("buy.mp3")
+            elif signal == "SELL":
+                play_sound("sell.mp3")
+
+        st.session_state.last_signal = signal
+
+    # Log
+    st.session_state.trade_log.append({
+        "time": datetime.datetime.now().strftime("%H:%M"),
+        "signal": signal,
+        "price": float(price),
+        "qty": qty
+    })
+
+else:
+    st.info("No Trade Condition")
+
+# ================= TRADE LOG =================
+st.subheader("📋 Trade Log")
+
+if st.session_state.trade_log:
+    st.dataframe(pd.DataFrame(st.session_state.trade_log))
