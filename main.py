@@ -1,8 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import numpy as np
 import base64
+import datetime
 from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
@@ -11,24 +11,30 @@ st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
 if "sound_enabled" not in st.session_state:
     st.session_state.sound_enabled = False
 
-if "signals_log" not in st.session_state:
-    st.session_state.signals_log = []
+if "last_signal" not in st.session_state:
+    st.session_state.last_signal = None
 
 # ================= SOUND =================
 def play_sound(file):
-    with open(file, "rb") as f:
-        b64 = base64.b64encode(f.read()).decode()
-    st.markdown(f"""
+    try:
+        with open(file, "rb") as f:
+            b64 = base64.b64encode(f.read()).decode()
+        st.markdown(f"""
         <audio autoplay>
         <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
         </audio>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
+    except:
+        pass
 
 # ================= DATA =================
 @st.cache_data(ttl=60)
 def get_data(symbol, interval):
-    df = yf.download(symbol, period="1d", interval=interval)
-    return df
+    try:
+        df = yf.download(symbol, period="5d", interval=interval)
+        return df
+    except:
+        return None
 
 # ================= INDICATORS =================
 def add_indicators(df):
@@ -36,13 +42,10 @@ def add_indicators(df):
     df["EMA50"] = df["Close"].ewm(span=50).mean()
 
     delta = df["Close"].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(14).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(14).mean()
+    gain = delta.clip(lower=0).rolling(14).mean()
+    loss = -delta.clip(upper=0).rolling(14).mean()
     rs = gain / loss
     df["RSI"] = 100 - (100 / (1 + rs))
-
-    df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
-    df["ATR"] = (df["High"] - df["Low"]).rolling(14).mean()
 
     return df.dropna()
 
@@ -52,28 +55,46 @@ def prepare_ml(df):
     df["ema_diff"] = df["EMA20"] - df["EMA50"]
     df["volatility"] = df["High"] - df["Low"]
     df = df.dropna()
+
+    if len(df) < 50:
+        return None, None
+
     X = df[["RSI", "ema_diff", "volatility"]]
     y = df["target"]
+
     return X, y
 
 @st.cache_resource
 def train_model(df):
     X, y = prepare_ml(df)
-    if len(X) < 50:
+    if X is None:
         return None
+
     model = RandomForestClassifier(n_estimators=50)
     model.fit(X, y)
     return model
 
 def predict(model, df):
-    if model is None:
+    if model is None or df.empty:
         return 0.5
+
     last = df.iloc[-1]
-    X = [[last["RSI"], last["EMA20"]-last["EMA50"], last["High"]-last["Low"]]]
-    return model.predict_proba(X)[0][1]
+
+    try:
+        X = [[
+            last["RSI"],
+            last["EMA20"] - last["EMA50"],
+            last["High"] - last["Low"]
+        ]]
+        return model.predict_proba(X)[0][1]
+    except:
+        return 0.5
 
 # ================= SIGNAL =================
 def get_signal(df, prob):
+    if df is None or df.empty:
+        return "NO DATA"
+
     last = df.iloc[-1]
 
     if prob > 0.65 and last["Close"] > last["EMA20"]:
@@ -83,85 +104,52 @@ def get_signal(df, prob):
     else:
         return "NO TRADE"
 
-# ================= OPTION =================
-def get_atm(price):
-    return round(price/100)*100
-
-# ================= BACKTEST =================
-def backtest(df, model):
-    balance = 10000
-    trades = []
-
-    for i in range(50, len(df)-3):
-        sub = df.iloc[:i]
-        prob = predict(model, sub)
-        sig = get_signal(sub, prob)
-
-        if sig == "NO TRADE":
-            continue
-
-        entry = df["Close"].iloc[i]
-        exit = df["Close"].iloc[i+3]
-
-        pnl = exit-entry if sig=="BUY" else entry-exit
-        balance += pnl
-
-        trades.append(pnl)
-
-    return trades, balance
-
 # ================= UI =================
 st.title("🦅 Trade Hawk AI PRO")
 
 with st.sidebar:
-    symbol = st.selectbox("Market", ["^NSEI","^NSEBANK"])
-    tf = st.selectbox("Timeframe", ["5m","15m"])
+    symbol = st.selectbox("Market", ["^NSEI", "^NSEBANK"])
+    tf = st.selectbox("Timeframe", ["5m", "15m"])
 
     if st.button("🔔 Enable Sound"):
         st.session_state.sound_enabled = True
 
+# ================= MAIN =================
 df = get_data(symbol, tf)
 
-if df is not None and not df.empty:
-    df = add_indicators(df)
+# 🔥 CRITICAL FIX
+if df is None or df.empty:
+    st.error("⚠️ Data not available (Rate limit / Market closed)")
+    st.stop()
 
-    model = train_model(df)
-    prob = predict(model, df)
+df = add_indicators(df)
 
-    signal = get_signal(df, prob)
+if df.empty:
+    st.warning("Not enough data after indicators")
+    st.stop()
 
-    price = df["Close"].iloc[-1]
-    strike = get_atm(price)
+model = train_model(df)
+prob = predict(model, df)
 
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Signal", signal)
-    col2.metric("AI Confidence", f"{prob:.2f}")
-    col3.metric("ATM Strike", strike)
+signal = get_signal(df, prob)
 
-    st.line_chart(df["Close"])
+price = df["Close"].iloc[-1]
+strike = round(price / 100) * 100
 
-    # SOUND
-    if st.session_state.sound_enabled and signal in ["BUY","SELL"]:
-        play_sound("buy.mp3")
+# ================= UI DISPLAY =================
+col1, col2, col3 = st.columns(3)
+col1.metric("Signal", signal)
+col2.metric("AI Confidence", f"{prob:.2f}")
+col3.metric("ATM Strike", strike)
 
-    # LOG
-    import datetime
-    st.session_state.signals_log.append({
-        "time": datetime.datetime.now().strftime("%H:%M"),
-        "signal": signal,
-        "price": float(price)
-    })
+st.line_chart(df["Close"])
 
-    # BACKTEST
-    trades, bal = backtest(df, model)
+# ================= SOUND =================
+if signal != st.session_state.last_signal:
+    if st.session_state.sound_enabled:
+        if signal == "BUY":
+            play_sound("buy.mp3")
+        elif signal == "SELL":
+            play_sound("sell.mp3")
 
-    st.subheader("📊 Backtest")
-    st.write("Balance:", round(bal,2))
-    st.line_chart(pd.Series(trades).cumsum())
-
-    # REPORT
-    st.subheader("🧾 Daily Report")
-    st.dataframe(pd.DataFrame(st.session_state.signals_log))
-
-else:
-    st.warning("No data")
+    st.session_state.last_signal = signal
