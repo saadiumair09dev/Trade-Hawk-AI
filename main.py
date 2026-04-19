@@ -1,46 +1,95 @@
 import streamlit as st
-from data.dhan_api import get_data
-from indicators.indicators import add_indicators
+import pandas as pd
+import yfinance as yf
 
+# =========================
+# CONFIG
+# =========================
 st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
 st.title("📈 Trade Hawk AI")
 
-# Inputs
-symbol = st.selectbox("Select Index", ["^NSEI"])
+# =========================
+# INPUTS
+# =========================
+symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY"])
 interval = st.selectbox("Timeframe", ["5m", "15m", "1h"])
 
-# Fetch data
+# =========================
+# DATA FETCH (YFINANCE)
+# =========================
+@st.cache_data(ttl=60)
+def get_data(symbol, interval):
+    try:
+        df = yf.download(
+            tickers=symbol,
+            interval=interval,
+            period="1d",
+            progress=False
+        )
+
+        if df is None or df.empty:
+            return None
+
+        # ===== FIX MULTI INDEX =====
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0].lower() for col in df.columns]
+        else:
+            df.columns = [str(col).lower() for col in df.columns]
+
+        return df
+
+    except Exception as e:
+        st.error(f"YFinance error: {e}")
+        return None
+
+
 df = get_data(symbol, interval)
 
-if df is None or df.empty:
+# =========================
+# CHECK DATA
+# =========================
+if df is None:
     st.error("❌ Data fetch failed")
     st.stop()
 
 st.success("✅ Data Loaded")
 
-# Add indicators
-df = add_indicators(df)
+# =========================
+# INDICATORS
+# =========================
+try:
+    if "close" not in df.columns:
+        st.error("❌ 'close' column missing")
+        st.stop()
 
-# Check columns exist BEFORE using
-required_cols = ["EMA_9", "EMA_21"]
+    # EMA
+    df["ema_9"] = df["close"].ewm(span=9).mean()
+    df["ema_21"] = df["close"].ewm(span=21).mean()
 
-missing = [col for col in required_cols if col not in df.columns]
-
-if missing:
-    st.error(f"❌ Indicator calculation failed: Missing {missing}")
-    st.dataframe(df.tail())
+except Exception as e:
+    st.error(f"❌ Indicator calculation failed: {e}")
     st.stop()
 
-st.success("✅ Indicators Calculated")
+# =========================
+# SIGNAL LOGIC
+# =========================
+try:
+    last = df.iloc[-1]
 
-# Signal Logic
-last = df.iloc[-1]
+    signal = "NEUTRAL"
 
-if last["EMA_9"] > last["EMA_21"]:
-    st.success("🟢 BUY Signal")
-else:
-    st.error("🔴 SELL Signal")
+    if last["ema_9"] > last["ema_21"]:
+        signal = "BUY"
+    elif last["ema_9"] < last["ema_21"]:
+        signal = "SELL"
 
-# Show data
+    st.subheader(f"📊 Signal: {signal}")
+
+except Exception as e:
+    st.error(f"❌ Signal error: {e}")
+
+# =========================
+# DISPLAY DATA
+# =========================
 st.dataframe(df.tail(10))
