@@ -22,6 +22,17 @@ if "last_alert_time" not in st.session_state:
 if "trade_log" not in st.session_state:
     st.session_state.trade_log = []
 
+# ================= TOGGLE =================
+def toggle_sound():
+    st.session_state.sound_enabled = not st.session_state.sound_enabled
+
+with st.sidebar:
+    st.button(
+        "🔊 Sound ON" if st.session_state.sound_enabled else "🔇 Sound OFF",
+        on_click=toggle_sound
+    )
+    st.write("Status:", "ON ✅" if st.session_state.sound_enabled else "OFF ❌")
+
 # ================= SOUND =================
 def play_sound(file):
     try:
@@ -42,22 +53,27 @@ def voice_alert(text):
     if not st.session_state.sound_enabled:
         return
 
-    st.markdown(f"""
+    js = f"""
     <script>
-    const msg = new SpeechSynthesisUtterance("{text}");
-    msg.rate = 1;
-    msg.pitch = 1;
-    msg.volume = 1;
+    var msg = new SpeechSynthesisUtterance("{text}");
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(msg);
     </script>
-    """, unsafe_allow_html=True)
+    """
+    st.markdown(js, unsafe_allow_html=True)
+
+# ================= TEST BUTTON =================
+if st.sidebar.button("▶️ Test Voice"):
+    voice_alert("System ready. Voice working")
 
 # ================= DATA =================
 @st.cache_data(ttl=60)
 def get_data(symbol, interval):
     try:
-        return yf.download(symbol, period="5d", interval=interval)
+        df = yf.download(symbol, period="5d", interval=interval)
+        if df is None or df.empty:
+            df = yf.download(symbol, period="5d", interval="15m")
+        return df
     except:
         return None
 
@@ -104,11 +120,7 @@ def predict(model, df):
 
     last = df.iloc[-1]
     try:
-        X = [[
-            last["RSI"],
-            last["EMA20"] - last["EMA50"],
-            last["High"] - last["Low"]
-        ]]
+        X = [[last["RSI"], last["EMA20"]-last["EMA50"], last["High"]-last["Low"]]]
         return model.predict_proba(X)[0][1]
     except:
         return 0.5
@@ -139,14 +151,7 @@ def live_filter(df, prob):
 
     return True
 
-# ================= RISK =================
-def risk_control(balance, price):
-    risk_per_trade = 0.01
-    sl = price * 0.98
-    qty = int((balance * risk_per_trade) / (price - sl)) if price != sl else 0
-    return qty, sl
-
-# ================= AI REASON =================
+# ================= REASON =================
 def generate_reason(df, prob):
     last = df.iloc[-1]
     reasons = []
@@ -164,70 +169,44 @@ def generate_reason(df, prob):
     if abs(last["EMA20"] - last["EMA50"]) > 2:
         reasons.append("trend strong")
     else:
-        reasons.append("sideways market")
-
-    if prob > 0.7:
-        reasons.append("AI confidence high")
+        reasons.append("sideways")
 
     return ", ".join(reasons)
 
-# ================= UI =================
+# ================= MAIN =================
 st.title("🦅 Trade Hawk AI PRO")
 
-with st.sidebar:
-    symbol = st.selectbox("Market", ["^NSEI", "^NSEBANK"])
-    tf = st.selectbox("Timeframe", ["5m", "15m"])
+symbol = "^NSEI"
+tf = "5m"
 
-    if st.button("🔊 Enable Sound"):
-        st.session_state.sound_enabled = True
-
-    if st.button("🔇 Mute"):
-        st.session_state.sound_enabled = False
-
-    if st.button("▶️ Test Voice"):
-        voice_alert("System ready")
-
-# ================= MAIN =================
 df = get_data(symbol, tf)
 
 if df is None or df.empty:
-    st.error("⚠️ Data not available")
+    st.error("No data available")
     st.stop()
 
 df = add_indicators(df)
 
 if df.empty:
-    st.warning("Not enough data")
     st.stop()
 
 model = train_model(df)
 prob = predict(model, df)
 signal = get_signal(df, prob)
-price = df["Close"].iloc[-1]
-strike = round(price / 100) * 100
 
+price = df["Close"].iloc[-1]
 reason = generate_reason(df, prob)
 
-# ================= DISPLAY =================
-col1, col2, col3 = st.columns(3)
-col1.metric("Signal", signal)
-col2.metric("AI Confidence", f"{prob:.2f}")
-col3.metric("ATM Strike", strike)
-
+st.metric("Signal", signal)
+st.metric("Confidence", f"{prob:.2f}")
 st.line_chart(df["Close"])
 
-st.subheader("🧠 AI Reason")
-st.info(reason)
+st.info(f"🧠 {reason}")
 
-# ================= EXECUTION =================
-balance = 10000
+# ================= ALERT =================
 current_time = time.time()
 
 if signal in ["BUY", "SELL"] and live_filter(df, prob):
-
-    qty, sl = risk_control(balance, price)
-
-    st.success(f"{signal} ORDER | Price: {price:.2f} | Qty: {qty} | SL: {sl:.2f}")
 
     if (signal != st.session_state.last_signal) or (current_time - st.session_state.last_alert_time > 60):
 
@@ -237,19 +216,3 @@ if signal in ["BUY", "SELL"] and live_filter(df, prob):
 
         st.session_state.last_signal = signal
         st.session_state.last_alert_time = current_time
-
-    st.session_state.trade_log.append({
-        "time": datetime.datetime.now().strftime("%H:%M"),
-        "signal": signal,
-        "price": float(price),
-        "qty": qty
-    })
-
-else:
-    st.info("No Trade Condition")
-
-# ================= TRADE LOG =================
-st.subheader("📋 Trade Log")
-
-if st.session_state.trade_log:
-    st.dataframe(pd.DataFrame(st.session_state.trade_log))
