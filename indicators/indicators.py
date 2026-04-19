@@ -1,38 +1,38 @@
 import pandas as pd
 
 def add_indicators(df):
-    """
-    Add EMA, RSI, VWAP indicators
-    """
+    try:
+        if df is None or df.empty:
+            return None
 
-    # Safety check
-    if df is None or df.empty:
+        # column fix
+        df.columns = [c.capitalize() for c in df.columns]
+
+        # required columns check
+        if "Close" not in df.columns:
+            return None
+
+        # ================= EMA =================
+        df["EMA_9"] = df["Close"].ewm(span=9).mean()
+        df["EMA_21"] = df["Close"].ewm(span=21).mean()
+
+        # ================= RSI =================
+        delta = df["Close"].diff()
+
+        gain = delta.where(delta > 0, 0)
+        loss = -delta.where(delta < 0, 0)
+
+        avg_gain = gain.rolling(14).mean()
+        avg_loss = loss.rolling(14).mean()
+
+        rs = avg_gain / avg_loss
+        df["RSI"] = 100 - (100 / (1 + rs))
+
+        # ================= CLEAN =================
+        df.fillna(0, inplace=True)
+
         return df
 
-    df = df.copy()
-
-    # ================= EMA =================
-    df["EMA20"] = df["Close"].ewm(span=20, adjust=False).mean()
-
-    # ================= RSI =================
-    delta = df["Close"].diff()
-
-    gain = delta.clip(lower=0)
-    loss = -delta.clip(upper=0)
-
-    avg_gain = gain.rolling(window=14).mean()
-    avg_loss = loss.rolling(window=14).mean()
-
-    rs = avg_gain / avg_loss
-    df["RSI"] = 100 - (100 / (1 + rs))
-
-    # ================= VWAP =================
-    if "Volume" in df.columns:
-        df["VWAP"] = (df["Close"] * df["Volume"]).cumsum() / df["Volume"].cumsum()
-    else:
-        df["VWAP"] = df["Close"]
-
-    # ================= CLEAN =================
-    df = df.dropna()
-
-    return df
+    except Exception as e:
+        print("Indicator Error:", e)
+        return None
