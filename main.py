@@ -1,126 +1,44 @@
 import streamlit as st
-
-# ================= IMPORTS =================
 from data.dhan_api import get_data
 from indicators.indicators import add_indicators
-from strategies.signal_engine import base_signal
-from strategies.filters import crash_detection, trap_detection, gap_detection
-from strategies.correlation import correlation
-from ai.ai_model import train_model, predict
-from risk.position import position_size, risk_label
-from ui.chart import plot_chart
-from config import SYMBOLS
 
-# ================= PAGE CONFIG =================
-st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
+st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
-st.title("🦅 Trade Hawk AI PRO (Modular System)")
+st.title("📈 Trade Hawk AI")
 
-# ================= FETCH DATA =================
-nifty = get_data(SYMBOLS["NIFTY"])
-bank = get_data(SYMBOLS["BANKNIFTY"])
-fin = get_data(SYMBOLS["FINNIFTY"])
+# ================= INPUT =================
+symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY", "^FINNIFTY"])
+interval = st.selectbox("Timeframe", ["5m", "15m", "1h"])
 
-if nifty is None or bank is None or fin is None:
-    st.error("❌ Data fetch error (Check Dhan API)")
+# ================= DATA =================
+df = get_data(symbol, interval)
+
+if df is None or df.empty:
+    st.error("❌ Data fetch failed")
     st.stop()
 
-# ================= ADD INDICATORS =================
-nifty = add_indicators(nifty)
-bank = add_indicators(bank)
-fin = add_indicators(fin)
+st.success("✅ Data Loaded")
 
-if nifty is None or nifty.empty:
+# ================= INDICATORS =================
+df = add_indicators(df)
+
+if df is None or df.empty:
     st.error("❌ Indicator calculation failed")
     st.stop()
 
-# ================= BASE SIGNAL =================
-base = base_signal(nifty)
+st.success("✅ Indicators Ready")
 
-# ================= CORRELATION =================
-corr = correlation(nifty, bank, fin)
+# ================= DEBUG =================
+st.subheader("Last Data")
+st.dataframe(df.tail())
 
-# ================= FINAL SIGNAL =================
-final = "NO"
+# ================= SIMPLE SIGNAL =================
+signal = "NO TRADE"
 
-if base == corr:
-    final = base
+if df["EMA_9"].iloc[-1] > df["EMA_21"].iloc[-1] and df["Rsi"].iloc[-1] > 50:
+    signal = "BUY"
+elif df["EMA_9"].iloc[-1] < df["EMA_21"].iloc[-1] and df["Rsi"].iloc[-1] < 50:
+    signal = "SELL"
 
-# ================= FILTERS =================
-crash = crash_detection(nifty)
-trap = trap_detection(nifty)
-gap = gap_detection(nifty)
-
-if crash:
-    st.warning("🚨 Crash / Spike Detected")
-    final = "NO"
-
-if trap:
-    st.warning("🪤 Trap Candle Detected")
-    final = "NO"
-
-if gap:
-    st.info("📊 Gap Detected")
-
-# ================= AI =================
-model = train_model(nifty)
-ai_pred, confidence = predict(nifty, model)
-
-# AI FILTER
-if final == "BUY" and ai_pred == "DOWN":
-    final = "NO"
-
-elif final == "SELL" and ai_pred == "UP":
-    final = "NO"
-
-# ================= POSITION SIZE =================
-pos_size = position_size(confidence)
-risk_text = risk_label(pos_size)
-
-if pos_size == 0:
-    final = "NO"
-
-# ================= UI =================
-st.subheader("📊 Signal Dashboard")
-
-col1, col2, col3 = st.columns(3)
-
-with col1:
-    st.metric("Base Signal", base)
-
-with col2:
-    st.metric("Correlation", corr)
-
-with col3:
-    st.metric("Final Signal", final)
-
-# ================= AI DISPLAY =================
-st.subheader("🤖 AI Prediction")
-
-st.write(f"Direction: **{ai_pred}**")
-st.write(f"Confidence: **{confidence}%**")
-
-# ================= POSITION =================
-st.subheader("💰 Position Sizing")
-
-st.write(f"Allocation: **{int(pos_size*100)}%**")
-st.write(f"Risk Level: **{risk_text}**")
-
-# ================= CHART =================
-st.subheader("📉 Market Chart")
-
-fig = plot_chart(nifty, final)
-if fig:
-    st.plotly_chart(fig, use_container_width=True)
-
-# ================= FINAL STATUS =================
-st.subheader("📢 System Status")
-
-if final == "BUY":
-    st.success("🟢 BUY Signal Confirmed")
-
-elif final == "SELL":
-    st.error("🔴 SELL Signal Confirmed")
-
-else:
-    st.warning("🟡 NO TRADE (Filtered)")
+st.subheader("Signal")
+st.write(signal)
