@@ -1,63 +1,77 @@
 import requests
 import pandas as pd
+import streamlit as st
+import yfinance as yf
 
-# ===== CONFIG =====
 BASE_URL = "https://api.dhan.co/v2/charts/intraday"
 
-TOKEN = "PASTE_YOUR_TOKEN_HERE"
-CLIENT_ID = "1106554867"
 
-HEADERS = {
-    "access-token": TOKEN,
-    "Content-Type": "application/json"
-}
-
-# ===== SYMBOL MAP =====
-SYMBOL_MAP = {
-    "^NSEI": "13",       # NIFTY
-    "^NSEBANK": "25"     # BANKNIFTY
-}
-
-# ===== INTERVAL MAP =====
-INTERVAL_MAP = {
-    "1m": "1",
-    "5m": "5",
-    "15m": "15"
-}
-
-# ===== MAIN FUNCTION =====
-def get_data(symbol, interval):
+# ================= DHAN FETCH =================
+def fetch_dhan(symbol, interval):
     try:
-        security_id = SYMBOL_MAP.get(symbol)
-        interval_val = INTERVAL_MAP.get(interval, "5")
+        # ===== SECRETS =====
+        token = st.secrets["dhan"]["token"]
+        client_id = st.secrets["dhan"]["client_id"]
 
-        if not security_id:
-            raise Exception("Unsupported symbol")
-
-        payload = {
-            "securityId": security_id,
-            "exchangeSegment": "IDX_I",
-            "instrument": "INDEX",
-            "interval": interval_val
+        # ===== SYMBOL MAP =====
+        symbol_map = {
+            "^NSEI": {"securityId": "26000", "exchangeSegment": "NSE_INDEX"},
+            "^BANKNIFTY": {"securityId": "26009", "exchangeSegment": "NSE_INDEX"},
         }
 
-        response = requests.post(BASE_URL, json=payload, headers=HEADERS)
+        if symbol not in symbol_map:
+            return None
 
-        if response.status_code != 200:
-            raise Exception(response.text)
+        # ===== INTERVAL MAP =====
+        interval_map = {
+            "1m": "1",
+            "5m": "5",
+            "15m": "15",
+            "1h": "60"
+        }
 
-        data = response.json()
+        dhan_interval = interval_map.get(interval, "5")
 
-        # 👇 Important: correct key
-        candles = data.get("data", [])
+        # ===== PAYLOAD =====
+        payload = {
+            "securityId": symbol_map[symbol]["securityId"],
+            "exchangeSegment": symbol_map[symbol]["exchangeSegment"],
+            "instrument": "INDEX",
+            "interval": dhan_interval
+        }
 
-        if not candles:
-            raise Exception("No data returned")
+        headers = {
+            "access-token": token,
+            "client-id": client_id,
+            "Content-Type": "application/json"
+        }
 
-        df = pd.DataFrame(candles)
+        # ===== API CALL =====
+        res = requests.post(BASE_URL, json=payload, headers=headers, timeout=10)
 
-        # rename columns
-        df.columns = ["datetime", "open", "high", "low", "close", "volume"]
+        if res.status_code != 200:
+            st.warning(f"⚠️ Dhan API Error: {res.status_code}")
+            st.write(res.text)
+            return None
+
+        data = res.json()
+
+        if "data" not in data:
+            st.warning("⚠️ Invalid Dhan response")
+            st.write(data)
+            return None
+
+        raw = data["data"]
+
+        # ===== BUILD DATAFRAME =====
+        df = pd.DataFrame({
+            "datetime": raw["timestamp"],
+            "open": raw["open"],
+            "high": raw["high"],
+            "low": raw["low"],
+            "close": raw["close"],
+            "volume": raw.get("volume", [0]*len(raw["close"]))
+        })
 
         df["datetime"] = pd.to_datetime(df["datetime"])
         df.set_index("datetime", inplace=True)
@@ -65,5 +79,50 @@ def get_data(symbol, interval):
         return df
 
     except Exception as e:
-        print("Dhan Error:", e)
+        st.error(f"❌ Dhan error: {e}")
         return None
+
+
+# ================= YFINANCE FALLBACK =================
+def fetch_yfinance(symbol, interval):
+    try:
+        df = yf.download(
+            tickers=symbol,
+            interval=interval,
+            period="1d",
+            progress=False
+        )
+
+        if df is None or df.empty:
+            return None
+
+        # ===== FIX MULTI-INDEX =====
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = [col[0].lower() for col in df.columns]
+        else:
+            df.columns = [str(col).lower() for col in df.columns]
+
+        return df
+
+    except Exception as e:
+        st.warning(f"⚠️ YFinance error: {e}")
+        return None
+
+
+# ================= MAIN FUNCTION =================
+def get_data(symbol, interval):
+    # 1️⃣ Try Dhan
+    df = fetch_dhan(symbol, interval)
+
+    if df is not None and not df.empty:
+        st.success("⚡ Data from Dhan API")
+        return df
+
+    # 2️⃣ Fallback
+    df = fetch_yfinance(symbol, interval)
+
+    if df is not None and not df.empty:
+        st.warning("⚠️ Using fallback (yfinance)")
+        return df
+
+    return None
