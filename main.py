@@ -1,11 +1,8 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import base64
-import datetime
-import os
 import time
-from sklearn.ensemble import RandomForestClassifier
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
 
@@ -19,9 +16,6 @@ if "last_signal" not in st.session_state:
 if "last_alert_time" not in st.session_state:
     st.session_state.last_alert_time = 0
 
-if "trade_log" not in st.session_state:
-    st.session_state.trade_log = []
-
 # ================= TOGGLE =================
 def toggle_sound():
     st.session_state.sound_enabled = not st.session_state.sound_enabled
@@ -31,147 +25,137 @@ with st.sidebar:
         "🔊 Sound ON" if st.session_state.sound_enabled else "🔇 Sound OFF",
         on_click=toggle_sound
     )
-    st.write("Status:", "ON ✅" if st.session_state.sound_enabled else "OFF ❌")
-
-# ================= SOUND =================
-def play_sound(file):
-    try:
-        if os.path.exists(file):
-            with open(file, "rb") as f:
-                b64 = base64.b64encode(f.read()).decode()
-
-            st.markdown(f"""
-            <audio autoplay playsinline>
-            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-            </audio>
-            """, unsafe_allow_html=True)
-    except:
-        pass
 
 # ================= VOICE =================
 def voice_alert(text):
     if not st.session_state.sound_enabled:
         return
 
-    js = f"""
+    components.html(f"""
     <script>
     var msg = new SpeechSynthesisUtterance("{text}");
     window.speechSynthesis.cancel();
     window.speechSynthesis.speak(msg);
-    </script>
-    """
-    st.markdown(js, unsafe_allow_html=True)
 
-# ================= TEST BUTTON =================
+    if (navigator.vibrate) {{
+        navigator.vibrate([200,100,200]);
+    }}
+    </script>
+    """, height=0)
+
+# ================= TEST =================
 if st.sidebar.button("▶️ Test Voice"):
+    st.session_state.sound_enabled = True
     voice_alert("System ready. Voice working")
 
 # ================= DATA =================
 @st.cache_data(ttl=60)
-def get_data(symbol, interval):
+def get_data(symbol, tf):
     try:
-        df = yf.download(symbol, period="5d", interval=interval)
-        if df is None or df.empty:
-            df = yf.download(symbol, period="5d", interval="15m")
+        df = yf.download(symbol, period="5d", interval=tf)
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
         return df
     except:
         return None
 
+# ================= GIFT =================
+def get_gift_bias():
+    try:
+        df = yf.download("^NSEI", period="1d", interval="5m")
+
+        if df is None or df.empty:
+            return "UNKNOWN"
+
+        if isinstance(df.columns, pd.MultiIndex):
+            df.columns = df.columns.get_level_values(0)
+
+        change = df["Close"].iloc[-1] - df["Close"].iloc[-10]
+
+        if change > 30:
+            return "BULLISH"
+        elif change < -30:
+            return "BEARISH"
+        else:
+            return "SIDEWAYS"
+    except:
+        return "UNKNOWN"
+
 # ================= INDICATORS =================
 def add_indicators(df):
     df["EMA20"] = df["Close"].ewm(span=20).mean()
-    df["EMA50"] = df["Close"].ewm(span=50).mean()
 
     delta = df["Close"].diff()
     gain = delta.clip(lower=0).rolling(14).mean()
     loss = -delta.clip(upper=0).rolling(14).mean()
     rs = gain / loss
-    df["RSI"] = 100 - (100 / (1 + rs))
+    df["RSI"] = 100 - (100/(1+rs))
 
     return df.dropna()
 
-# ================= ML =================
-def prepare_ml(df):
-    df["target"] = (df["Close"].shift(-3) > df["Close"]).astype(int)
-    df["ema_diff"] = df["EMA20"] - df["EMA50"]
-    df["volatility"] = df["High"] - df["Low"]
-    df = df.dropna()
-
-    if len(df) < 50:
-        return None, None
-
-    X = df[["RSI", "ema_diff", "volatility"]]
-    y = df["target"]
-    return X, y
-
-@st.cache_resource
-def train_model(df):
-    X, y = prepare_ml(df)
-    if X is None:
-        return None
-
-    model = RandomForestClassifier(n_estimators=50)
-    model.fit(X, y)
-    return model
-
-def predict(model, df):
-    if model is None or df.empty:
-        return 0.5
-
-    last = df.iloc[-1]
-    try:
-        X = [[last["RSI"], last["EMA20"]-last["EMA50"], last["High"]-last["Low"]]]
-        return model.predict_proba(X)[0][1]
-    except:
-        return 0.5
-
-# ================= SIGNAL =================
-def get_signal(df, prob):
-    if df is None or df.empty:
+# ================= ADVANCED SIGNAL =================
+def advanced_signal(df):
+    if df is None or df.empty or len(df) < 30:
         return "NO DATA"
 
     last = df.iloc[-1]
 
-    if prob > 0.65 and last["Close"] > last["EMA20"]:
+    ema20 = last["EMA20"]
+    price = last["Close"]
+    rsi = last["RSI"]
+
+    trend_strength = abs(df["EMA20"].iloc[-1] - df["EMA20"].iloc[-5])
+    atr = (df["High"] - df["Low"]).rolling(14).mean().iloc[-1]
+
+    if atr < 5:
+        return "NO TRADE"
+
+    if trend_strength < 2:
+        return "NO TRADE"
+
+    if price > ema20 and rsi > 60:
         return "BUY"
-    elif prob < 0.35 and last["Close"] < last["EMA20"]:
+    elif price < ema20 and rsi < 40:
         return "SELL"
     else:
         return "NO TRADE"
 
-# ================= FILTER =================
-def live_filter(df, prob):
-    last = df.iloc[-1]
-
-    if prob < 0.6:
+# ================= SPIKE =================
+def detect_spike(df):
+    if df is None or len(df) < 5:
         return False
 
-    if abs(last["EMA20"] - last["EMA50"]) < 2:
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
+
+    move = abs(last["Close"] - prev["Close"])
+    candle = last["High"] - last["Low"]
+
+    return move > 80 or candle > 120
+
+# ================= CRASH =================
+def market_crash_guard(df):
+    if len(df) < 10:
+        return False
+
+    move = df["Close"].iloc[-1] - df["Close"].iloc[-10]
+
+    return abs(move) > 150
+
+# ================= GIFT FILTER =================
+def gift_filter(signal, bias):
+    if bias == "UNKNOWN":
+        return True
+
+    if signal == "BUY" and bias != "BULLISH":
+        return False
+
+    if signal == "SELL" and bias != "BEARISH":
         return False
 
     return True
-
-# ================= REASON =================
-def generate_reason(df, prob):
-    last = df.iloc[-1]
-    reasons = []
-
-    if last["RSI"] > 60:
-        reasons.append("RSI strong")
-    elif last["RSI"] < 40:
-        reasons.append("RSI weak")
-
-    if last["Close"] > last["EMA20"]:
-        reasons.append("price above EMA")
-    else:
-        reasons.append("price below EMA")
-
-    if abs(last["EMA20"] - last["EMA50"]) > 2:
-        reasons.append("trend strong")
-    else:
-        reasons.append("sideways")
-
-    return ", ".join(reasons)
 
 # ================= MAIN =================
 st.title("🦅 Trade Hawk AI PRO")
@@ -182,7 +166,7 @@ tf = "5m"
 df = get_data(symbol, tf)
 
 if df is None or df.empty:
-    st.error("No data available")
+    st.error("❌ No data")
     st.stop()
 
 df = add_indicators(df)
@@ -190,29 +174,54 @@ df = add_indicators(df)
 if df.empty:
     st.stop()
 
-model = train_model(df)
-prob = predict(model, df)
-signal = get_signal(df, prob)
-
+signal = advanced_signal(df)
 price = df["Close"].iloc[-1]
-reason = generate_reason(df, prob)
 
+gift_bias = get_gift_bias()
+
+spike = detect_spike(df)
+crash = market_crash_guard(df)
+
+# ================= FILTER =================
+if spike:
+    st.warning("⚠️ Spike detected")
+    signal = "NO TRADE"
+
+if crash:
+    st.error("🚨 Market crash/pump")
+    signal = "NO TRADE"
+
+if not gift_filter(signal, gift_bias):
+    st.info("Filtered by global bias")
+    signal = "NO TRADE"
+
+# ================= DISPLAY =================
 st.metric("Signal", signal)
-st.metric("Confidence", f"{prob:.2f}")
+st.metric("Price", f"{price:.2f}")
+st.metric("GIFT Bias", gift_bias)
+
 st.line_chart(df["Close"])
 
-st.info(f"🧠 {reason}")
-
 # ================= ALERT =================
-current_time = time.time()
+now = time.time()
 
-if signal in ["BUY", "SELL"] and live_filter(df, prob):
+if signal in ["BUY", "SELL"]:
 
-    if (signal != st.session_state.last_signal) or (current_time - st.session_state.last_alert_time > 60):
+    if (signal != st.session_state.last_signal) or (now - st.session_state.last_alert_time > 60):
 
         if st.session_state.sound_enabled:
-            play_sound("buy.mp3")
-            voice_alert(f"{signal} signal. {reason}")
+            voice_alert(f"{signal} signal confirmed. Market stable")
 
         st.session_state.last_signal = signal
-        st.session_state.last_alert_time = current_time
+        st.session_state.last_alert_time = now
+
+        st.success(f"{signal} TRADE")
+
+elif spike:
+    voice_alert("Warning. Market spike detected")
+
+elif crash:
+    voice_alert("Danger. Market crash detected")
+
+else:
+    st.info("No Trade")
