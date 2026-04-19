@@ -2,34 +2,46 @@ import pandas as pd
 
 def add_indicators(df):
     try:
+        # ================= SAFETY =================
         if df is None or df.empty:
+            print("DataFrame empty")
             return None
 
-        # column fix
-        df.columns = [c.capitalize() for c in df.columns]
+        # normalize column names
+        df.columns = [str(c).strip().capitalize() for c in df.columns]
 
         # required columns check
-        if "Close" not in df.columns:
-            return None
+        required = ["Open", "High", "Low", "Close"]
+        for col in required:
+            if col not in df.columns:
+                print(f"Missing column: {col}")
+                return None
 
         # ================= EMA =================
-        df["EMA_9"] = df["Close"].ewm(span=9).mean()
-        df["EMA_21"] = df["Close"].ewm(span=21).mean()
+        df["EMA_9"] = df["Close"].ewm(span=9, adjust=False).mean()
+        df["EMA_21"] = df["Close"].ewm(span=21, adjust=False).mean()
 
         # ================= RSI =================
         delta = df["Close"].diff()
 
-        gain = delta.where(delta > 0, 0)
-        loss = -delta.where(delta < 0, 0)
+        gain = delta.copy()
+        loss = delta.copy()
 
-        avg_gain = gain.rolling(14).mean()
-        avg_loss = loss.rolling(14).mean()
+        gain[gain < 0] = 0
+        loss[loss > 0] = 0
+        loss = abs(loss)
 
-        rs = avg_gain / avg_loss
-        df["RSI"] = 100 - (100 / (1 + rs))
+        avg_gain = gain.rolling(window=14, min_periods=1).mean()
+        avg_loss = loss.rolling(window=14, min_periods=1).mean()
+
+        rs = avg_gain / (avg_loss + 1e-9)
+        df["Rsi"] = 100 - (100 / (1 + rs))
+
+        # ================= VWAP =================
+        df["Vwap"] = (df["Close"] * df.get("Volume", 1)).cumsum() / (df.get("Volume", 1).cumsum())
 
         # ================= CLEAN =================
-        df.fillna(0, inplace=True)
+        df = df.fillna(0)
 
         return df
 
