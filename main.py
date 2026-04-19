@@ -4,6 +4,7 @@ import pandas as pd
 import base64
 import datetime
 import os
+import time
 from sklearn.ensemble import RandomForestClassifier
 
 st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
@@ -15,6 +16,9 @@ if "sound_enabled" not in st.session_state:
 if "last_signal" not in st.session_state:
     st.session_state.last_signal = None
 
+if "last_alert_time" not in st.session_state:
+    st.session_state.last_alert_time = 0
+
 if "trade_log" not in st.session_state:
     st.session_state.trade_log = []
 
@@ -24,20 +28,36 @@ def play_sound(file):
         if os.path.exists(file):
             with open(file, "rb") as f:
                 b64 = base64.b64encode(f.read()).decode()
+
             st.markdown(f"""
-                <audio autoplay>
-                <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-                </audio>
+            <audio autoplay playsinline>
+            <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+            </audio>
             """, unsafe_allow_html=True)
     except:
         pass
+
+# ================= VOICE =================
+def voice_alert(text):
+    if not st.session_state.sound_enabled:
+        return
+
+    st.markdown(f"""
+    <script>
+    const msg = new SpeechSynthesisUtterance("{text}");
+    msg.rate = 1;
+    msg.pitch = 1;
+    msg.volume = 1;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(msg);
+    </script>
+    """, unsafe_allow_html=True)
 
 # ================= DATA =================
 @st.cache_data(ttl=60)
 def get_data(symbol, interval):
     try:
-        df = yf.download(symbol, period="5d", interval=interval)
-        return df
+        return yf.download(symbol, period="5d", interval=interval)
     except:
         return None
 
@@ -126,6 +146,31 @@ def risk_control(balance, price):
     qty = int((balance * risk_per_trade) / (price - sl)) if price != sl else 0
     return qty, sl
 
+# ================= AI REASON =================
+def generate_reason(df, prob):
+    last = df.iloc[-1]
+    reasons = []
+
+    if last["RSI"] > 60:
+        reasons.append("RSI strong")
+    elif last["RSI"] < 40:
+        reasons.append("RSI weak")
+
+    if last["Close"] > last["EMA20"]:
+        reasons.append("price above EMA")
+    else:
+        reasons.append("price below EMA")
+
+    if abs(last["EMA20"] - last["EMA50"]) > 2:
+        reasons.append("trend strong")
+    else:
+        reasons.append("sideways market")
+
+    if prob > 0.7:
+        reasons.append("AI confidence high")
+
+    return ", ".join(reasons)
+
 # ================= UI =================
 st.title("🦅 Trade Hawk AI PRO")
 
@@ -133,28 +178,35 @@ with st.sidebar:
     symbol = st.selectbox("Market", ["^NSEI", "^NSEBANK"])
     tf = st.selectbox("Timeframe", ["5m", "15m"])
 
-    if st.button("🔔 Enable Sound"):
+    if st.button("🔊 Enable Sound"):
         st.session_state.sound_enabled = True
+
+    if st.button("🔇 Mute"):
+        st.session_state.sound_enabled = False
+
+    if st.button("▶️ Test Voice"):
+        voice_alert("System ready")
 
 # ================= MAIN =================
 df = get_data(symbol, tf)
 
 if df is None or df.empty:
-    st.error("⚠️ Data not available (Rate limit / Market closed)")
+    st.error("⚠️ Data not available")
     st.stop()
 
 df = add_indicators(df)
 
 if df.empty:
-    st.warning("Not enough data after indicators")
+    st.warning("Not enough data")
     st.stop()
 
 model = train_model(df)
 prob = predict(model, df)
 signal = get_signal(df, prob)
-
 price = df["Close"].iloc[-1]
 strike = round(price / 100) * 100
+
+reason = generate_reason(df, prob)
 
 # ================= DISPLAY =================
 col1, col2, col3 = st.columns(3)
@@ -164,8 +216,12 @@ col3.metric("ATM Strike", strike)
 
 st.line_chart(df["Close"])
 
+st.subheader("🧠 AI Reason")
+st.info(reason)
+
 # ================= EXECUTION =================
 balance = 10000
+current_time = time.time()
 
 if signal in ["BUY", "SELL"] and live_filter(df, prob):
 
@@ -173,17 +229,15 @@ if signal in ["BUY", "SELL"] and live_filter(df, prob):
 
     st.success(f"{signal} ORDER | Price: {price:.2f} | Qty: {qty} | SL: {sl:.2f}")
 
-    # Sound only on new signal
-    if signal != st.session_state.last_signal:
+    if (signal != st.session_state.last_signal) or (current_time - st.session_state.last_alert_time > 60):
+
         if st.session_state.sound_enabled:
-            if signal == "BUY":
-                play_sound("buy.mp3")
-            elif signal == "SELL":
-                play_sound("sell.mp3")
+            play_sound("buy.mp3")
+            voice_alert(f"{signal} signal. {reason}")
 
         st.session_state.last_signal = signal
+        st.session_state.last_alert_time = current_time
 
-    # Log
     st.session_state.trade_log.append({
         "time": datetime.datetime.now().strftime("%H:%M"),
         "signal": signal,
