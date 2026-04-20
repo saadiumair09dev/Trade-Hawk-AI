@@ -10,7 +10,6 @@ st.set_page_config(layout="wide")
 
 st.title("📈 Trade Hawk AI")
 
-
 # ================= UI =================
 symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY"])
 interval = st.selectbox("Timeframe", ["1m", "5m", "15m"])
@@ -33,10 +32,16 @@ df = add_indicators(df)
 
 
 # ================= LOGIC SIGNAL =================
-logic_signal = generate_signal(df)
+logic_raw = generate_signal(df)
+
+# FIX tuple issue
+if isinstance(logic_raw, tuple):
+    logic_signal = logic_raw[0]
+else:
+    logic_signal = logic_raw
 
 
-# ================= AI MODEL =================
+# ================= AI =================
 model = train_model(df)
 
 ai_signal = "HOLD"
@@ -54,20 +59,54 @@ if mode == "LOGIC":
 elif mode == "AI":
     final_signal = ai_signal
 
-else:  # HYBRID
+else:
     if logic_signal == ai_signal:
         final_signal = logic_signal
     else:
         final_signal = "HOLD"
 
 
+# ================= ENTRY / EXIT =================
+last_price = df["close"].iloc[-1]
+
+entry = last_price
+sl = last_price * 0.995
+tp = last_price * 1.01
+
+
+# ================= MODE TEXT =================
+mode_text = mode
+
+if mode != "LOGIC":
+    mode_text = f"{mode} ({round(accuracy,2)}% accuracy)"
+
 # ================= DISPLAY =================
-st.subheader(f"📊 Mode: {mode}")
+st.subheader(f"📊 Mode: {mode_text}")
 
 st.subheader(f"📈 Signal: {final_signal}")
 
-if mode != "LOGIC":
-    st.metric("🎯 Accuracy %", round(accuracy, 2))
+
+# ================= TRADE INFO =================
+col1, col2, col3 = st.columns(3)
+
+col1.metric("Entry", round(entry, 2))
+col2.metric("Stop Loss", round(sl, 2))
+col3.metric("Target", round(tp, 2))
+
+
+# ================= LIVE PREDICTION =================
+if model is not None:
+    st.info("🔮 Live ML Prediction Active")
+
+
+# ================= EOD REPORT =================
+day_high = df["high"].max()
+day_low = df["low"].min()
+
+st.markdown("### 📊 EOD Report")
+
+st.write(f"🔼 Day High: {round(day_high,2)}")
+st.write(f"🔽 Day Low: {round(day_low,2)}")
 
 
 # ================= TABLE =================
