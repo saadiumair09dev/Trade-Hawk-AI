@@ -1,74 +1,117 @@
 import streamlit as st
+
 from data_fetcher import get_data
-from indicators.indicators import add_indicators
-from ml_model import train_model, predict_signal, predict_next_3, calculate_accuracy
+from indicators.indicators import add_indicators, generate_signal
+from ml_model import predict_next, predict_multi, calculate_accuracy
 
-st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
-st.title("📈 Trade Hawk AI")
+# ================= PAGE =================
+st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
+st.title("📈 Trade Hawk AI PRO")
+
 
 # ================= INPUT =================
-symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY"])
-interval = st.selectbox("Timeframe", ["1m", "5m", "15m"])
+symbol = st.selectbox(
+    "Select Symbol",
+    ["^NSEI", "^BANKNIFTY", "RELIANCE", "HDFCBANK"]
+)
 
-mode = st.selectbox("Trading Mode", ["LOGIC", "AI"])
+interval = st.selectbox(
+    "Timeframe",
+    ["1m", "5m", "15m", "1h"]
+)
+
+
+# ================= MODE OPTIONS =================
+mode_options = {
+    "⚡ Scalping (Fast | 50%)": "Scalping",
+    "⚖️ Balanced (Medium | 60%)": "Balanced",
+    "🎯 Strict (Safe | 75%)": "Strict",
+    "🔀 Hybrid (Smart | 70%)": "Hybrid",
+    "🤖 AI Mode (Adaptive | 72%)": "AI Mode",
+    "🧠 ML Mode (Predictive | 75-80%)": "ML Mode"
+}
+
+selected_label = st.selectbox(
+    "Trading Mode",
+    list(mode_options.keys())
+)
+
+mode = mode_options[selected_label]
+
+# ✅ BONUS (ONLY ONCE, CORRECT PLACE)
+st.info(f"📌 Selected Mode: {selected_label}")
+
 
 # ================= DATA =================
 df = get_data(symbol, interval)
 
-if df is None:
+if df is None or df.empty:
     st.error("❌ Data fetch failed")
     st.stop()
 
 df = add_indicators(df)
 
-st.success("✅ Data Loaded")
 
-# ================= ML =================
-model = train_model(df)
-
-signal = predict_signal(model, df)
-next3 = predict_next_3(model, df)
+# ================= ACCURACY =================
 accuracy = calculate_accuracy(df)
+st.info(f"📊 Model Accuracy: {accuracy}%")
 
-# ================= ENTRY LOGIC =================
-price = df["close"].iloc[-1]
 
-if signal == "BUY":
-    entry = price
-    sl = price - 50
-    tp = price + 100
-elif signal == "SELL":
-    entry = price
-    sl = price + 50
-    tp = price - 100
+# ================= SIGNAL =================
+if mode == "ML Mode":
+    try:
+        signal, confidence = predict_next(df)
+
+        if signal == "BUY":
+            st.success(f"🤖 ML BUY | Confidence: {confidence}%")
+        else:
+            st.error(f"🤖 ML SELL | Confidence: {confidence}%")
+
+    except:
+        st.warning("⏳ WAIT")
+
 else:
-    entry, sl, tp = "-", "-", "-"
+    signal, confidence, reasons = generate_signal(df, mode)
 
-# ================= DISPLAY =================
-st.subheader(f"📊 Mode: {mode} ({accuracy}% accuracy - {signal})")
+    if signal in ["BUY", "STRONG BUY"]:
+        st.success(f"🚀 {signal} | Confidence: {confidence}%")
+    elif signal in ["SELL", "STRONG SELL"]:
+        st.error(f"🔻 {signal} | Confidence: {confidence}%")
+    else:
+        st.warning("⏳ WAIT")
 
-col1, col2, col3, col4 = st.columns(4)
+    if reasons:
+        st.subheader("🧠 Reason")
+        for r in reasons:
+            st.write("•", r)
 
-col1.metric("Signal", signal)
-col2.metric("Entry", entry)
-col3.metric("SL", sl)
-col4.metric("TP", tp)
 
-# ================= NEXT 3 =================
+# ================= MULTI CANDLE =================
 st.subheader("🔮 Next 3 Candle Prediction")
-st.write(next3)
 
-# ================= TABLE =================
-st.dataframe(df.tail(20))
+try:
+    multi = predict_multi(df, 3)
+
+    for i, (sig, conf) in enumerate(multi):
+        st.write(f"Candle {i+1}: {sig} ({conf}%)")
+
+except:
+    st.write("Prediction not available")
+
 
 # ================= EOD REPORT =================
-st.subheader("📄 EOD Report")
+st.subheader("📋 EOD Report")
 
-st.write({
-    "Symbol": symbol,
-    "Timeframe": interval,
-    "Final Signal": signal,
-    "Accuracy": f"{accuracy}%",
-    "Next 3": next3
-})
+st.write(f"Symbol: {symbol}")
+st.write(f"Mode: {selected_label}")
+st.write(f"Accuracy: {accuracy}%")
+st.write(f"Last Signal: {signal}")
+
+
+# ================= DATA =================
+st.subheader("📊 Data")
+st.dataframe(df.tail(50))
+
+st.subheader("📉 Chart")
+st.line_chart(df["close"])
