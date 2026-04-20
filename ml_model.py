@@ -2,10 +2,8 @@ import pandas as pd
 import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import accuracy_score
 
-
-# ================= FEATURE =================
+# ================= FEATURES =================
 def prepare_features(df):
     df = df.copy()
 
@@ -14,10 +12,7 @@ def prepare_features(df):
     df["ma_10"] = df["close"].rolling(10).mean()
     df["volatility"] = df["returns"].rolling(5).std()
 
-    df["target"] = np.where(df["close"].shift(-1) > df["close"], 1, 0)
-
     df = df.dropna()
-
     return df
 
 
@@ -25,64 +20,74 @@ def prepare_features(df):
 def train_model(df):
     df = prepare_features(df)
 
-    if df is None or df.empty or len(df) < 20:
+    if df is None or len(df) < 30:
         return None
+
+    df["target"] = np.where(df["close"].shift(-1) > df["close"], 1, 0)
 
     features = ["returns", "ma_5", "ma_10", "volatility"]
 
     X = df[features]
     y = df["target"]
 
-    if X.isnull().values.any():
-        return None
-
-    model = RandomForestClassifier(n_estimators=50)
+    model = RandomForestClassifier(n_estimators=100)
     model.fit(X, y)
 
     return model
 
 
-# ================= PREDICT =================
+# ================= SINGLE PREDICTION =================
 def predict_signal(model, df):
     try:
         df = prepare_features(df)
 
-        if model is None or df.empty:
-            return "HOLD"
-
         features = ["returns", "ma_5", "ma_10", "volatility"]
 
-        last_row = df[features].iloc[-1:]
-
-        pred = model.predict(last_row)[0]
+        last = df[features].iloc[-1:]
+        pred = model.predict(last)[0]
 
         return "BUY" if pred == 1 else "SELL"
-
     except:
         return "HOLD"
 
 
-# ================= ACCURACY =================
-def calculate_accuracy(df):
+# ================= 3 CANDLE PREDICTION =================
+def predict_next_3(model, df):
     try:
         df = prepare_features(df)
 
-        if df is None or len(df) < 20:
-            return 0
-
         features = ["returns", "ma_5", "ma_10", "volatility"]
 
-        X = df[features]
-        y = df["target"]
+        last_price = df["close"].iloc[-1]
+        last_row = df.iloc[-1:].copy()
 
-        model = RandomForestClassifier(n_estimators=50)
-        model.fit(X, y)
+        predictions = []
 
-        preds = model.predict(X)
+        for i in range(3):
+            X = last_row[features]
+            pred = model.predict(X)[0]
 
-        acc = accuracy_score(y, preds) * 100
+            direction = "UP" if pred == 1 else "DOWN"
 
-        return acc
+            # simple price projection
+            move = last_price * 0.002   # ~0.2% move
+
+            if direction == "UP":
+                next_price = last_price + move
+            else:
+                next_price = last_price - move
+
+            predictions.append({
+                "candle": i+1,
+                "direction": direction,
+                "expected_price": round(next_price, 2)
+            })
+
+            # update for next step
+            last_price = next_price
+            last_row["close"] = next_price
+
+        return predictions
 
     except:
-        return 0
+        return []
