@@ -3,6 +3,7 @@ import streamlit as st
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
 from ml_model import predict_next, predict_multi, calculate_accuracy
+from trade_logger import log_trade, load_trades, update_results, calculate_strike_rate
 
 
 # ================= PAGE =================
@@ -20,24 +21,35 @@ def trigger_alert(signal):
     if signal not in ["BUY", "SELL"]:
         return
 
-    # 🚫 same signal repeat block
     if st.session_state.last_signal == signal:
         return
 
     st.session_state.last_signal = signal
 
-    # 🔊 sound (3 times)
     for _ in range(3):
         st.audio("https://www.soundjay.com/buttons/beep-07.mp3")
 
-    # 📳 vibration (mobile support)
     st.markdown("""
     <script>
     if (navigator.vibrate) {
-        navigator.vibrate([300, 200, 300, 200, 500]);
+        navigator.vibrate([300,200,300,200,500]);
     }
     </script>
     """, unsafe_allow_html=True)
+
+
+# ================= SL/TP =================
+def calculate_sl_tp(price, signal):
+    if signal == "BUY":
+        sl = price * 0.995
+        tp = price * 1.01
+    elif signal == "SELL":
+        sl = price * 1.005
+        tp = price * 0.99
+    else:
+        return None, None
+
+    return round(sl, 2), round(tp, 2)
 
 
 # ================= INPUT =================
@@ -52,7 +64,7 @@ interval = st.selectbox(
 )
 
 
-# ================= MODE OPTIONS =================
+# ================= MODE =================
 mode_options = {
     "⚡ Scalping (Fast | 50%)": "Scalping",
     "⚖️ Balanced (Medium | 60%)": "Balanced",
@@ -62,11 +74,7 @@ mode_options = {
     "🧠 ML Mode (Predictive | 75-80%)": "ML Mode"
 }
 
-selected_label = st.selectbox(
-    "Trading Mode",
-    list(mode_options.keys())
-)
-
+selected_label = st.selectbox("Trading Mode", list(mode_options.keys()))
 mode = mode_options[selected_label]
 
 st.info(f"📌 Selected Mode: {selected_label}")
@@ -88,7 +96,8 @@ st.info(f"📊 Model Accuracy: {accuracy}%")
 
 
 # ================= SIGNAL =================
-signal = "WAIT"  # default safety
+signal = "WAIT"
+confidence = 0
 
 if mode == "ML Mode":
     try:
@@ -120,11 +129,35 @@ else:
             st.write("•", r)
 
 
-# ================= 🔥 ALERT TRIGGER =================
+# ================= ALERT =================
 trigger_alert(signal)
 
 
-# ================= MULTI CANDLE =================
+# ================= TRADE LOG =================
+price = df["close"].iloc[-1]
+
+if signal in ["BUY", "SELL"]:
+    log_trade(signal, price)
+
+trades = update_results(price)
+
+
+# ================= STRIKE RATE =================
+strike = calculate_strike_rate(trades)
+st.info(f"🎯 Strike Rate: {strike}%")
+
+
+# ================= SL/TP DISPLAY =================
+sl, tp = calculate_sl_tp(price, signal)
+
+if sl and tp:
+    st.subheader("🎯 Risk Management")
+    st.info(f"Entry: {round(price,2)}")
+    st.success(f"Take Profit (TP): {tp}")
+    st.error(f"Stop Loss (SL): {sl}")
+
+
+# ================= MULTI =================
 st.subheader("🔮 Next 3 Candle Prediction")
 
 try:
@@ -137,7 +170,16 @@ except:
     st.write("Prediction not available")
 
 
-# ================= EOD REPORT =================
+# ================= TRADE LOG UI =================
+st.subheader("📒 Trade Log")
+
+if not trades.empty:
+    st.dataframe(trades.tail(20))
+else:
+    st.write("No trades yet")
+
+
+# ================= EOD =================
 st.subheader("📋 EOD Report")
 
 st.write(f"Symbol: {symbol}")
