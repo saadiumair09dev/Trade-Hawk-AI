@@ -2,16 +2,16 @@ import streamlit as st
 import pandas as pd
 
 from data_fetcher import get_data
-from indicators.indicators import add_indicators, generate_signal
+from indicators import add_indicators, generate_signal
 
 
-# ================= UI =================
+# ================= PAGE =================
 st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
 st.title("📈 Trade Hawk AI")
 
 
-# ================= INPUT =================
+# ================= INPUT (ALWAYS VISIBLE) =================
 symbol = st.selectbox(
     "Select Index / Stock",
     ["^NSEI", "^BANKNIFTY", "RELIANCE", "HDFCBANK"]
@@ -22,6 +22,12 @@ interval = st.selectbox(
     ["1m", "5m", "15m", "1h"]
 )
 
+# 🔥 MODE ALWAYS VISIBLE (FIXED)
+mode = st.selectbox(
+    "Select Trading Mode",
+    ["Scalping", "Balanced", "Strict"]
+)
+
 
 # ================= FETCH DATA =================
 df = get_data(symbol, interval)
@@ -29,7 +35,6 @@ df = get_data(symbol, interval)
 if df is None or df.empty:
     st.error("❌ Data fetch failed")
     st.stop()
-
 
 st.success("✅ Data Loaded")
 
@@ -44,27 +49,28 @@ except Exception as e:
 
 # ================= SIGNAL =================
 try:
-    signal = generate_signal(df)
+    signal = generate_signal(df, mode)
 
-    if signal == "BUY":
-        st.success("📊 Signal: BUY")
+    if signal == "STRONG BUY":
+        st.success("🚀 STRONG BUY")
+    elif signal == "BUY":
+        st.success("🟢 BUY")
+    elif signal == "STRONG SELL":
+        st.error("🔻 STRONG SELL")
     elif signal == "SELL":
-        st.error("📊 Signal: SELL")
+        st.error("🔴 SELL")
     else:
-        st.warning("📊 Signal: HOLD")
+        st.warning("⏳ WAIT")
 
 except Exception as e:
     st.error(f"❌ Signal error: {e}")
 
 
-# ================= DATA TABLE =================
+# ================= DATA =================
 st.subheader("📊 Latest Data")
-
-# last rows only
 st.dataframe(df.tail(50))
 
 
 # ================= CHART =================
 st.subheader("📉 Price Chart")
-
 st.line_chart(df["close"])
