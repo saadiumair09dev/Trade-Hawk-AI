@@ -10,6 +10,36 @@ st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
 st.title("📈 Trade Hawk AI PRO")
 
 
+# ================= ALERT MEMORY =================
+if "last_signal" not in st.session_state:
+    st.session_state.last_signal = None
+
+
+# ================= ALERT FUNCTION =================
+def trigger_alert(signal):
+    if signal not in ["BUY", "SELL"]:
+        return
+
+    # 🚫 same signal repeat block
+    if st.session_state.last_signal == signal:
+        return
+
+    st.session_state.last_signal = signal
+
+    # 🔊 sound (3 times)
+    for _ in range(3):
+        st.audio("https://www.soundjay.com/buttons/beep-07.mp3")
+
+    # 📳 vibration (mobile support)
+    st.markdown("""
+    <script>
+    if (navigator.vibrate) {
+        navigator.vibrate([300, 200, 300, 200, 500]);
+    }
+    </script>
+    """, unsafe_allow_html=True)
+
+
 # ================= INPUT =================
 symbol = st.selectbox(
     "Select Symbol",
@@ -39,7 +69,6 @@ selected_label = st.selectbox(
 
 mode = mode_options[selected_label]
 
-# ✅ BONUS (ONLY ONCE, CORRECT PLACE)
 st.info(f"📌 Selected Mode: {selected_label}")
 
 
@@ -59,14 +88,18 @@ st.info(f"📊 Model Accuracy: {accuracy}%")
 
 
 # ================= SIGNAL =================
+signal = "WAIT"  # default safety
+
 if mode == "ML Mode":
     try:
         signal, confidence = predict_next(df)
 
         if signal == "BUY":
             st.success(f"🤖 ML BUY | Confidence: {confidence}%")
-        else:
+        elif signal == "SELL":
             st.error(f"🤖 ML SELL | Confidence: {confidence}%")
+        else:
+            st.warning("⏳ WAIT")
 
     except:
         st.warning("⏳ WAIT")
@@ -85,6 +118,10 @@ else:
         st.subheader("🧠 Reason")
         for r in reasons:
             st.write("•", r)
+
+
+# ================= 🔥 ALERT TRIGGER =================
+trigger_alert(signal)
 
 
 # ================= MULTI CANDLE =================
