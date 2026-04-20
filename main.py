@@ -1,28 +1,22 @@
 import streamlit as st
+import pandas as pd
 
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
-from ml_model import predict_next, predict_multi, calculate_accuracy
+from ml_model import train_model, predict_signal, calculate_accuracy
 
 
-st.set_page_config(page_title="Trade Hawk AI", layout="wide")
-st.title("📈 Trade Hawk AI PRO")
+st.set_page_config(layout="wide")
 
-# ================= INPUT =================
-symbol = st.selectbox(
-    "Select Symbol",
-    ["^NSEI", "^BANKNIFTY", "RELIANCE", "HDFCBANK"]
-)
+st.title("📈 Trade Hawk AI")
 
-interval = st.selectbox(
-    "Timeframe",
-    ["1m", "5m", "15m", "1h"]
-)
 
-mode = st.selectbox(
-    "Trading Mode",
-    ["Scalping", "Balanced", "Strict", "Hybrid", "AI Mode", "ML Mode"]
-)
+# ================= UI =================
+symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY"])
+interval = st.selectbox("Timeframe", ["1m", "5m", "15m"])
+
+mode = st.selectbox("Trading Mode", ["LOGIC", "AI", "HYBRID"])
+
 
 # ================= DATA =================
 df = get_data(symbol, interval)
@@ -31,50 +25,50 @@ if df is None or df.empty:
     st.error("❌ Data fetch failed")
     st.stop()
 
+st.success("✅ Data Loaded")
+
+
+# ================= INDICATORS =================
 df = add_indicators(df)
 
-# ================= ACCURACY =================
-accuracy = calculate_accuracy(df)
 
-st.info(f"📊 Model Accuracy: {accuracy}%")
+# ================= LOGIC SIGNAL =================
+logic_signal = generate_signal(df)
 
-# ================= SIGNAL =================
-if mode == "ML Mode":
-    signal, confidence = predict_next(df)
 
-    if signal == "BUY":
-        st.success(f"🤖 ML BUY | Confidence: {confidence}%")
+# ================= AI MODEL =================
+model = train_model(df)
+
+ai_signal = "HOLD"
+accuracy = 0
+
+if model is not None:
+    ai_signal = predict_signal(model, df)
+    accuracy = calculate_accuracy(df)
+
+
+# ================= FINAL SIGNAL =================
+if mode == "LOGIC":
+    final_signal = logic_signal
+
+elif mode == "AI":
+    final_signal = ai_signal
+
+else:  # HYBRID
+    if logic_signal == ai_signal:
+        final_signal = logic_signal
     else:
-        st.error(f"🤖 ML SELL | Confidence: {confidence}%")
+        final_signal = "HOLD"
 
-else:
-    signal, confidence, reasons = generate_signal(df, mode)
 
-    if signal in ["BUY", "STRONG BUY"]:
-        st.success(f"🚀 {signal} | Confidence: {confidence}%")
-    elif signal in ["SELL", "STRONG SELL"]:
-        st.error(f"🔻 {signal} | Confidence: {confidence}%")
-    else:
-        st.warning("⏳ WAIT")
+# ================= DISPLAY =================
+st.subheader(f"📊 Mode: {mode}")
 
-# ================= MULTI CANDLE =================
-st.subheader("🔮 Next 3 Candle Prediction")
+st.metric("📈 Signal", final_signal)
 
-multi = predict_multi(df, 3)
+if mode != "LOGIC":
+    st.metric("🎯 Accuracy %", f"{accuracy:.2f}%")
 
-for i, (sig, conf) in enumerate(multi):
-    st.write(f"Candle {i+1}: {sig} ({conf}%)")
 
-# ================= EOD REPORT =================
-st.subheader("📋 EOD Report")
-
-st.write(f"Symbol: {symbol}")
-st.write(f"Mode: {mode}")
-st.write(f"Accuracy: {accuracy}%")
-
-# ================= DATA =================
-st.subheader("📊 Data")
-st.dataframe(df.tail(50))
-
-st.subheader("📉 Chart")
-st.line_chart(df["close"])
+# ================= TABLE =================
+st.dataframe(df.tail(10))
