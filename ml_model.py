@@ -1,86 +1,94 @@
 import pandas as pd
-import numpy as np
 from sklearn.ensemble import RandomForestClassifier
 
-# ================= TRAIN MODEL =================
-def train_model(df):
+
+def prepare_features(df):
     df = df.copy()
 
-    df["target"] = np.where(df["close"].shift(-1) > df["close"], 1, 0)
+    df["return"] = df["close"].pct_change()
+    df["ema_diff"] = df["EMA_9"] - df["EMA_21"]
+    df["rsi"] = df["RSI"]
+    df["vol"] = df["volume"]
 
-    df = df.dropna()
+    df.dropna(inplace=True)
 
-    features = ["close", "EMA_9", "EMA_21", "RSI"]
+    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+
+    return df
+
+
+def train_model(df):
+    df = prepare_features(df)
+
+    features = ["return", "ema_diff", "rsi", "vol"]
 
     X = df[features]
     y = df["target"]
 
-    model = RandomForestClassifier(n_estimators=50)
+    model = RandomForestClassifier(n_estimators=100)
     model.fit(X, y)
 
-    return model
+    return model, features
 
 
-# ================= SIGNAL =================
-def predict_signal(model, df):
-    try:
-        last = df[["close", "EMA_9", "EMA_21", "RSI"]].dropna().iloc[-1:]
-        pred = model.predict(last)[0]
+def predict_next(df):
+    model, features = train_model(df)
 
-        if pred == 1:
-            return "BUY"
-        else:
-            return "SELL"
+    latest = df.iloc[-1:]
+    X_live = latest[features]
 
-    except:
-        return "WAIT"
+    pred = model.predict(X_live)[0]
+    prob = model.predict_proba(X_live)[0]
 
+    confidence = round(max(prob) * 100, 2)
 
-# ================= NEXT 3 CANDLE =================
-def predict_next_3(model, df):
-    try:
-        features = df[["close", "EMA_9", "EMA_21", "RSI"]].dropna()
-
-        if len(features) < 10:
-            return ["NA", "NA", "NA"]
-
-        last = features.iloc[-1:].values
-
-        preds = []
-
-        for _ in range(3):
-            pred = model.predict(last)[0]
-
-            if pred == 1:
-                preds.append("UP")
-            else:
-                preds.append("DOWN")
-
-        return preds
-
-    except:
-        return ["ERR", "ERR", "ERR"]
+    if pred == 1:
+        return "BUY", confidence
+    else:
+        return "SELL", confidence
 
 
-# ================= ACCURACY =================
+def predict_multi(df, steps=3):
+    results = []
+    temp_df = df.copy()
+
+    for _ in range(steps):
+        signal, conf = predict_next(temp_df)
+        results.append((signal, conf))
+
+        last_close = temp_df["close"].iloc[-1]
+        new_close = last_close * (1.001 if signal == "BUY" else 0.999)
+
+        new_row = temp_df.iloc[-1:].copy()
+        new_row["close"] = new_close
+
+        temp_df = pd.concat([temp_df, new_row])
+
+    return results
+
+
 def calculate_accuracy(df):
-    try:
-        df = df.copy()
+    df = prepare_features(df)
 
-        df["target"] = np.where(df["close"].shift(-1) > df["close"], 1, 0)
-        df = df.dropna()
+    correct = 0
+    total = 0
 
-        features = ["close", "EMA_9", "EMA_21", "RSI"]
+    for i in range(len(df)-1):
+        sub_df = df.iloc[:i+1]
 
-        X = df[features]
-        y = df["target"]
+        model, features = train_model(sub_df)
 
-        model = RandomForestClassifier(n_estimators=50)
-        model.fit(X, y)
+        X = sub_df.iloc[-1:][features]
+        pred = model.predict(X)[0]
 
-        acc = model.score(X, y)
+        actual = sub_df["target"].iloc[-1]
 
-        return round(acc * 100, 2)
+        if pred == actual:
+            correct += 1
 
-    except:
+        total += 1
+
+    if total == 0:
         return 0
+
+    return round((correct / total) * 100, 2)
