@@ -22,7 +22,7 @@ def is_market_open():
     return start <= now <= end
 
 
-# ================= DHAN =================
+# ================= DHAN (ONLY FOR STOCKS) =================
 def fetch_dhan(symbol, interval):
     try:
         token = st.secrets["dhan"]["token"]
@@ -87,13 +87,18 @@ def fetch_dhan(symbol, interval):
         return None
 
 
-# ================= YFINANCE =================
+# ================= YFINANCE (MAIN SOURCE FOR INDEX) =================
 def fetch_yfinance(symbol, interval):
     try:
-        if is_market_open():
-            period = "1d"
-        else:
+        # 🔥 SYMBOL FIX
+        if symbol == "^BANKNIFTY":
+            symbol = "^NSEBANK"
+
+        # 🔥 SAFE PERIOD (IMPORTANT FIX)
+        if interval in ["1m", "5m"]:
             period = "5d"
+        else:
+            period = "1mo"
 
         df = yf.download(
             tickers=symbol,
@@ -102,9 +107,19 @@ def fetch_yfinance(symbol, interval):
             progress=False
         )
 
+        # 🔥 FALLBACK IF FAIL
+        if df is None or df.empty:
+            df = yf.download(
+                tickers=symbol,
+                interval="5m",
+                period="5d",
+                progress=False
+            )
+
         if df is None or df.empty:
             return None
 
+        # FIX COLUMNS
         if isinstance(df.columns, pd.MultiIndex):
             df.columns = [col[0].lower() for col in df.columns]
         else:
@@ -114,7 +129,8 @@ def fetch_yfinance(symbol, interval):
 
         return df
 
-    except:
+    except Exception as e:
+        st.warning(f"YFinance error: {e}")
         return None
 
 
@@ -129,7 +145,7 @@ def get_data(symbol, interval):
     else:
         st.warning("🌙 Market Closed Mode")
 
-    # 🔥 INDEX → ALWAYS YFINANCE
+    # 🔥 INDEX → ALWAYS YFINANCE (NO DHAN ERROR)
     if symbol.startswith("^"):
         df = fetch_yfinance(symbol, interval)
 
@@ -140,7 +156,7 @@ def get_data(symbol, interval):
         st.error("❌ Index data failed")
         return None
 
-    # 🔥 STOCK → TRY DHAN
+    # 🔥 STOCK → TRY DHAN FIRST
     if market_open:
         df = fetch_dhan(symbol, interval)
 
