@@ -1,122 +1,74 @@
 import streamlit as st
-import pandas as pd
-
 from data_fetcher import get_data
-from indicators.indicators import add_indicators, generate_signal
+from indicators.indicators import add_indicators
 from ml_model import train_model, predict_signal, predict_next_3, calculate_accuracy
 
-
-st.set_page_config(layout="wide")
+st.set_page_config(page_title="Trade Hawk AI", layout="wide")
 
 st.title("📈 Trade Hawk AI")
 
-# ================= UI =================
+# ================= INPUT =================
 symbol = st.selectbox("Select Index", ["^NSEI", "^BANKNIFTY"])
 interval = st.selectbox("Timeframe", ["1m", "5m", "15m"])
 
-mode = st.selectbox("Trading Mode", ["LOGIC", "AI", "HYBRID"])
-
+mode = st.selectbox("Trading Mode", ["LOGIC", "AI"])
 
 # ================= DATA =================
 df = get_data(symbol, interval)
 
-if df is None or df.empty:
+if df is None:
     st.error("❌ Data fetch failed")
     st.stop()
 
-st.success("✅ Data Loaded")
-
-
-# ================= INDICATORS =================
 df = add_indicators(df)
 
+st.success("✅ Data Loaded")
 
-# ================= LOGIC SIGNAL =================
-logic_raw = generate_signal(df)
-
-# FIX tuple issue
-if isinstance(logic_raw, tuple):
-    logic_signal = logic_raw[0]
-else:
-    logic_signal = logic_raw
-
-
-# ================= AI =================
+# ================= ML =================
 model = train_model(df)
 
-ai_signal = "HOLD"
-accuracy = 0
+signal = predict_signal(model, df)
+next3 = predict_next_3(model, df)
+accuracy = calculate_accuracy(df)
 
-if model is not None:
-    ai_signal = predict_signal(model, df)
-    accuracy = calculate_accuracy(df)
+# ================= ENTRY LOGIC =================
+price = df["close"].iloc[-1]
 
-
-# ================= FINAL SIGNAL =================
-if mode == "LOGIC":
-    final_signal = logic_signal
-
-elif mode == "AI":
-    final_signal = ai_signal
-
+if signal == "BUY":
+    entry = price
+    sl = price - 50
+    tp = price + 100
+elif signal == "SELL":
+    entry = price
+    sl = price + 50
+    tp = price - 100
 else:
-    if logic_signal == ai_signal:
-        final_signal = logic_signal
-    else:
-        final_signal = "HOLD"
-
-
-# ================= ENTRY / EXIT =================
-last_price = df["close"].iloc[-1]
-
-entry = last_price
-sl = last_price * 0.995
-tp = last_price * 1.01
-
-
-# ================= MODE TEXT =================
-mode_text = mode
-
-if mode != "LOGIC":
-    mode_text = f"{mode} ({round(accuracy,2)}% accuracy)"
+    entry, sl, tp = "-", "-", "-"
 
 # ================= DISPLAY =================
-st.subheader(f"📊 Mode: {mode_text}")
+st.subheader(f"📊 Mode: {mode} ({accuracy}% accuracy - {signal})")
 
-st.subheader(f"📈 Signal: {final_signal}")
+col1, col2, col3, col4 = st.columns(4)
 
-# ================= NEXT 3 CANDLES =================
-if model is not None:
-    preds = predict_next_3(model, df)
+col1.metric("Signal", signal)
+col2.metric("Entry", entry)
+col3.metric("SL", sl)
+col4.metric("TP", tp)
 
-    st.markdown("### 🔮 Next 3 Candle Prediction")
-
-    for p in preds:
-        st.write(
-            f"Candle {p['candle']} → {p['direction']} @ {p['expected_price']}"
-        )
-# ================= TRADE INFO =================
-col1, col2, col3 = st.columns(3)
-
-col1.metric("Entry", round(entry, 2))
-col2.metric("Stop Loss", round(sl, 2))
-col3.metric("Target", round(tp, 2))
-
-
-# ================= LIVE PREDICTION =================
-if model is not None:
-    st.info("🔮 Live ML Prediction Active")
-
-
-# ================= EOD REPORT =================
-day_high = df["high"].max()
-day_low = df["low"].min()
-
-st.markdown("### 📊 EOD Report")
-
-st.write(f"🔼 Day High: {round(day_high,2)}")
-st.write(f"🔽 Day Low: {round(day_low,2)}")
-
+# ================= NEXT 3 =================
+st.subheader("🔮 Next 3 Candle Prediction")
+st.write(next3)
 
 # ================= TABLE =================
-st.dataframe(df.tail(10))
+st.dataframe(df.tail(20))
+
+# ================= EOD REPORT =================
+st.subheader("📄 EOD Report")
+
+st.write({
+    "Symbol": symbol,
+    "Timeframe": interval,
+    "Final Signal": signal,
+    "Accuracy": f"{accuracy}%",
+    "Next 3": next3
+})
