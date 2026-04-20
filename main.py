@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 
 from data_fetcher import get_data
-from indicators import add_indicators, generate_signal
+from indicators.indicators import add_indicators, generate_signal
 
 
 # ================= PAGE =================
