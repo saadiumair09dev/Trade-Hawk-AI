@@ -1,103 +1,101 @@
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
+import numpy as np
 
-# ================= FEATURE =================
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score
+
+
+# ================= FEATURE ENGINEERING =================
 def prepare_features(df):
     df = df.copy()
 
-    df["return"] = df["close"].pct_change()
-    df["ema_diff"] = df["EMA_9"] - df["EMA_21"]
-    df["rsi"] = df["RSI"]
-    df["vol"] = df["volume"]
+    # Basic indicators
+    df["returns"] = df["close"].pct_change()
+    df["ma_5"] = df["close"].rolling(5).mean()
+    df["ma_10"] = df["close"].rolling(10).mean()
+    df["volatility"] = df["returns"].rolling(5).std()
 
-    df.dropna(inplace=True)
+    # Target (next candle up/down)
+    df["target"] = np.where(df["close"].shift(-1) > df["close"], 1, 0)
 
-    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    # Drop NaN rows
+    df = df.dropna()
 
     return df
 
 
-# ================= TRAIN =================
+# ================= TRAIN MODEL =================
 def train_model(df):
-    df = prepare_features(df)
+    try:
+        df = prepare_features(df)
 
-    features = ["return", "ema_diff", "rsi", "vol"]
+        # ❌ IMPORTANT FIX: empty data check
+        if df is None or df.empty or len(df) < 20:
+            return None, None
 
-    X = df[features]
-    y = df["target"]
+        features = ["returns", "ma_5", "ma_10", "volatility"]
 
-    model = RandomForestClassifier(n_estimators=120)
-    model.fit(X, y)
+        X = df[features]
+        y = df["target"]
 
-    return model, features
+        # ❌ IMPORTANT FIX: ensure no NaN
+        if X.isnull().values.any() or y.isnull().values.any():
+            return None, None
 
+        # Train/Test split
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, shuffle=False
+        )
 
-# ================= SINGLE PRED =================
-def predict_next(df):
-    model, features = train_model(df)
+        model = RandomForestClassifier(n_estimators=50)
+        model.fit(X_train, y_train)
 
-    latest = df.iloc[-1:]
-    X_live = latest[features]
+        return model, (X_test, y_test)
 
-    pred = model.predict(X_live)[0]
-    prob = model.predict_proba(X_live)[0]
-
-    confidence = round(max(prob) * 100, 2)
-
-    if pred == 1:
-        return "BUY", confidence
-    else:
-        return "SELL", confidence
+    except Exception as e:
+        print("ML Train Error:", e)
+        return None, None
 
 
-# ================= MULTI CANDLE =================
-def predict_multi(df, steps=3):
-    results = []
-    temp_df = df.copy()
+# ================= PREDICT =================
+def predict_signal(model, df):
+    try:
+        df = prepare_features(df)
 
-    for i in range(steps):
-        signal, conf = predict_next(temp_df)
+        if model is None or df is None or df.empty:
+            return "HOLD"
 
-        results.append((signal, conf))
+        features = ["returns", "ma_5", "ma_10", "volatility"]
 
-        # simulate next candle
-        last_close = temp_df["close"].iloc[-1]
-        if signal == "BUY":
-            new_close = last_close * (1 + 0.001)
-        else:
-            new_close = last_close * (1 - 0.001)
+        last_row = df[features].iloc[-1:]
 
-        new_row = temp_df.iloc[-1:].copy()
-        new_row["close"] = new_close
+        if last_row.isnull().values.any():
+            return "HOLD"
 
-        temp_df = pd.concat([temp_df, new_row])
+        pred = model.predict(last_row)[0]
 
-    return results
+        return "BUY" if pred == 1 else "SELL"
+
+    except:
+        return "HOLD"
 
 
 # ================= ACCURACY =================
 def calculate_accuracy(df):
-    df = prepare_features(df)
+    try:
+        model, test_data = train_model(df)
 
-    correct = 0
-    total = 0
+        if model is None or test_data is None:
+            return 0
 
-    for i in range(len(df)-1):
-        sub_df = df.iloc[:i+1]
+        X_test, y_test = test_data
 
-        model, features = train_model(sub_df)
+        preds = model.predict(X_test)
 
-        X = sub_df.iloc[-1:][features]
-        pred = model.predict(X)[0]
+        acc = accuracy_score(y_test, preds)
 
-        actual = sub_df["target"].iloc[-1]
+        return round(acc * 100, 2)
 
-        if pred == actual:
-            correct += 1
-
-        total += 1
-
-    if total == 0:
+    except:
         return 0
-
-    return round((correct / total) * 100, 2)
