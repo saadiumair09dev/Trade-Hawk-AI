@@ -2,7 +2,6 @@ import pandas as pd
 import numpy as np
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score
 
 
@@ -43,4 +42,47 @@ def train_model(df):
     return model
 
 
-# ================= SINGLE
+# ================= PREDICT =================
+def predict_signal(model, df):
+    try:
+        df = prepare_features(df)
+
+        if model is None or df.empty:
+            return "HOLD"
+
+        features = ["returns", "ma_5", "ma_10", "volatility"]
+
+        last_row = df[features].iloc[-1:]
+
+        pred = model.predict(last_row)[0]
+
+        return "BUY" if pred == 1 else "SELL"
+
+    except:
+        return "HOLD"
+
+
+# ================= ACCURACY =================
+def calculate_accuracy(df):
+    try:
+        df = prepare_features(df)
+
+        if df is None or len(df) < 20:
+            return 0
+
+        features = ["returns", "ma_5", "ma_10", "volatility"]
+
+        X = df[features]
+        y = df["target"]
+
+        model = RandomForestClassifier(n_estimators=50)
+        model.fit(X, y)
+
+        preds = model.predict(X)
+
+        acc = accuracy_score(y, preds) * 100
+
+        return acc
+
+    except:
+        return 0
