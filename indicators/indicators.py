@@ -1,32 +1,25 @@
 import pandas as pd
-import streamlit as st
 
-
-def fix_columns(df):
-    # Multi-index fix
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = [col[0].lower() for col in df.columns]
-    else:
-        df.columns = [str(col).lower() for col in df.columns]
-
+# ================= INDICATORS =================
+def add_indicators(df):
+    df["ema_9"] = df["close"].ewm(span=9).mean()
+    df["ema_21"] = df["close"].ewm(span=21).mean()
     return df
 
 
-def calculate_indicators(df):
-    try:
-        df = fix_columns(df)
+# ================= SIGNAL =================
+def generate_signal(df):
+    if len(df) < 2:
+        return "HOLD"
 
-        # Check required column
-        if "close" not in df.columns:
-            st.error("❌ Missing 'close' column")
-            return None
+    last = df.iloc[-1]
+    prev = df.iloc[-2]
 
-        # EMA calculations
-        df["ema_9"] = df["close"].ewm(span=9).mean()
-        df["ema_21"] = df["close"].ewm(span=21).mean()
+    # EMA crossover
+    if prev["ema_9"] < prev["ema_21"] and last["ema_9"] > last["ema_21"]:
+        return "BUY"
 
-        return df
+    elif prev["ema_9"] > prev["ema_21"] and last["ema_9"] < last["ema_21"]:
+        return "SELL"
 
-    except Exception as e:
-        st.error(f"❌ Indicator error: {e}")
-        return None
+    return "HOLD"
