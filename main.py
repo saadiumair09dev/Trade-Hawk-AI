@@ -48,23 +48,20 @@ except Exception as e:
 
 
 # ================= SIGNAL =================
-try:
-    signal = generate_signal(df, mode)
+signal, confidence, reasons = generate_signal(df, mode)
 
-    if signal == "STRONG BUY":
-        st.success("🚀 STRONG BUY")
-    elif signal == "BUY":
-        st.success("🟢 BUY")
-    elif signal == "STRONG SELL":
-        st.error("🔻 STRONG SELL")
-    elif signal == "SELL":
-        st.error("🔴 SELL")
-    else:
-        st.warning("⏳ WAIT")
+if signal in ["BUY", "STRONG BUY"]:
+    st.success(f"🚀 {signal} | Confidence: {confidence}%")
+elif signal in ["SELL", "STRONG SELL"]:
+    st.error(f"🔻 {signal} | Confidence: {confidence}%")
+else:
+    st.warning("⏳ WAIT")
 
-except Exception as e:
-    st.error(f"❌ Signal error: {e}")
-
+# 🔍 AI reasoning show
+if reasons:
+    st.subheader("🧠 Decision Reason")
+    for r in reasons:
+        st.write("•", r)
 
 # ================= DATA =================
 st.subheader("📊 Latest Data")
