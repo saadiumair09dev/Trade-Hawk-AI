@@ -64,10 +64,10 @@ else:  # HYBRID
 # ================= DISPLAY =================
 st.subheader(f"📊 Mode: {mode}")
 
-st.metric("📈 Signal", final_signal)
+st.subheader(f"📈 Signal: {final_signal}")
 
 if mode != "LOGIC":
-    st.metric("🎯 Accuracy %", f"{accuracy:.2f}%")
+    st.metric("🎯 Accuracy %", round(accuracy, 2))
 
 
 # ================= TABLE =================
