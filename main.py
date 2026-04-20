@@ -1,19 +1,16 @@
 import streamlit as st
-import pandas as pd
 
 from data_fetcher import get_data
-from indicators.indicators import add_indicators, generate_signal
+from indicators import add_indicators, generate_signal
+from ml_model import predict_next, predict_multi, calculate_accuracy
 
 
-# ================= PAGE =================
 st.set_page_config(page_title="Trade Hawk AI", layout="wide")
+st.title("📈 Trade Hawk AI PRO")
 
-st.title("📈 Trade Hawk AI")
-
-
-# ================= INPUT (ALWAYS VISIBLE) =================
+# ================= INPUT =================
 symbol = st.selectbox(
-    "Select Index / Stock",
+    "Select Symbol",
     ["^NSEI", "^BANKNIFTY", "RELIANCE", "HDFCBANK"]
 )
 
@@ -22,52 +19,62 @@ interval = st.selectbox(
     ["1m", "5m", "15m", "1h"]
 )
 
-# 🔥 MODE ALWAYS VISIBLE (FIXED)
 mode = st.selectbox(
-    "Select Trading Mode",
-    ["Scalping", "Balanced", "Strict"]
+    "Trading Mode",
+    ["Scalping", "Balanced", "Strict", "Hybrid", "AI Mode", "ML Mode"]
 )
 
-
-# ================= FETCH DATA =================
+# ================= DATA =================
 df = get_data(symbol, interval)
 
 if df is None or df.empty:
     st.error("❌ Data fetch failed")
     st.stop()
 
-st.success("✅ Data Loaded")
+df = add_indicators(df)
 
+# ================= ACCURACY =================
+accuracy = calculate_accuracy(df)
 
-# ================= INDICATORS =================
-try:
-    df = add_indicators(df)
-except Exception as e:
-    st.error(f"❌ Indicator error: {e}")
-    st.stop()
-
+st.info(f"📊 Model Accuracy: {accuracy}%")
 
 # ================= SIGNAL =================
-signal, confidence, reasons = generate_signal(df, mode)
+if mode == "ML Mode":
+    signal, confidence = predict_next(df)
 
-if signal in ["BUY", "STRONG BUY"]:
-    st.success(f"🚀 {signal} | Confidence: {confidence}%")
-elif signal in ["SELL", "STRONG SELL"]:
-    st.error(f"🔻 {signal} | Confidence: {confidence}%")
+    if signal == "BUY":
+        st.success(f"🤖 ML BUY | Confidence: {confidence}%")
+    else:
+        st.error(f"🤖 ML SELL | Confidence: {confidence}%")
+
 else:
-    st.warning("⏳ WAIT")
+    signal, confidence, reasons = generate_signal(df, mode)
 
-# 🔍 AI reasoning show
-if reasons:
-    st.subheader("🧠 Decision Reason")
-    for r in reasons:
-        st.write("•", r)
+    if signal in ["BUY", "STRONG BUY"]:
+        st.success(f"🚀 {signal} | Confidence: {confidence}%")
+    elif signal in ["SELL", "STRONG SELL"]:
+        st.error(f"🔻 {signal} | Confidence: {confidence}%")
+    else:
+        st.warning("⏳ WAIT")
+
+# ================= MULTI CANDLE =================
+st.subheader("🔮 Next 3 Candle Prediction")
+
+multi = predict_multi(df, 3)
+
+for i, (sig, conf) in enumerate(multi):
+    st.write(f"Candle {i+1}: {sig} ({conf}%)")
+
+# ================= EOD REPORT =================
+st.subheader("📋 EOD Report")
+
+st.write(f"Symbol: {symbol}")
+st.write(f"Mode: {mode}")
+st.write(f"Accuracy: {accuracy}%")
 
 # ================= DATA =================
-st.subheader("📊 Latest Data")
+st.subheader("📊 Data")
 st.dataframe(df.tail(50))
 
-
-# ================= CHART =================
-st.subheader("📉 Price Chart")
+st.subheader("📉 Chart")
 st.line_chart(df["close"])
