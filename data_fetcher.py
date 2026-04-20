@@ -22,10 +22,11 @@ def is_market_open():
     return start <= now <= end
 
 
-# ================= DHAN (ONLY FOR STOCKS) =================
+# ================= DHAN =================
 def fetch_dhan(symbol, interval):
     try:
         token = st.secrets["dhan"]["token"]
+        client_id = st.secrets["dhan"]["client_id"]
 
         symbol_map = {
             "RELIANCE": {"securityId": "1333", "exchangeSegment": "NSE_EQ"},
@@ -46,20 +47,24 @@ def fetch_dhan(symbol, interval):
             "securityId": symbol_map[symbol]["securityId"],
             "exchangeSegment": symbol_map[symbol]["exchangeSegment"],
             "instrument": "EQUITY",
-            "interval": interval_map.get(interval, "5")
+            "interval": interval_map.get(interval, "5"),
+            "oi": False
         }
 
         headers = {
             "access-token": token,
+            "client-id": client_id,
             "Content-Type": "application/json"
         }
 
         res = requests.post(BASE_URL, json=payload, headers=headers, timeout=10)
 
         if res.status_code != 200:
+            st.warning(f"Dhan Error: {res.status_code}")
             return None
 
         data = res.json()
+
         if "data" not in data:
             return None
 
@@ -83,18 +88,23 @@ def fetch_dhan(symbol, interval):
 
         return df
 
-    except:
+    except Exception as e:
+        st.warning(f"Dhan Exception: {e}")
         return None
 
 
-# ================= YFINANCE (MAIN SOURCE FOR INDEX) =================
+# ================= YFINANCE =================
 def fetch_yfinance(symbol, interval):
     try:
-        # 🔥 SYMBOL FIX
-        if symbol == "^BANKNIFTY":
+        # 🔥 FIX SYMBOLS
+        if symbol == "RELIANCE":
+            symbol = "RELIANCE.NS"
+        elif symbol == "HDFCBANK":
+            symbol = "HDFCBANK.NS"
+        elif symbol == "^BANKNIFTY":
             symbol = "^NSEBANK"
 
-        # 🔥 SAFE PERIOD (IMPORTANT FIX)
+        # 🔥 SAFE PERIOD
         if interval in ["1m", "5m"]:
             period = "5d"
         else:
@@ -107,7 +117,7 @@ def fetch_yfinance(symbol, interval):
             progress=False
         )
 
-        # 🔥 FALLBACK IF FAIL
+        # 🔥 FALLBACK
         if df is None or df.empty:
             df = yf.download(
                 tickers=symbol,
@@ -139,21 +149,19 @@ def get_data(symbol, interval):
 
     market_open = is_market_open()
 
-    # STATUS
     if market_open:
-        st.success("🟢 Market Open Mode")
+        st.success("🟢 Market Open")
     else:
-        st.warning("🌙 Market Closed Mode")
+        st.warning("🌙 Market Closed")
 
-    # 🔥 INDEX → ALWAYS YFINANCE (NO DHAN ERROR)
+    # 🔥 INDEX → YFINANCE ONLY
     if symbol.startswith("^"):
         df = fetch_yfinance(symbol, interval)
 
         if df is not None:
-            st.info("📊 Index data from yfinance")
+            st.info("Index data from yfinance")
             return df
 
-        st.error("❌ Index data failed")
         return None
 
     # 🔥 STOCK → TRY DHAN FIRST
@@ -168,8 +176,7 @@ def get_data(symbol, interval):
     df = fetch_yfinance(symbol, interval)
 
     if df is not None:
-        st.warning("⚠️ Using fallback (yfinance)")
+        st.warning("Using fallback (yfinance)")
         return df
 
-    st.error("❌ Data fetch failed")
     return None
