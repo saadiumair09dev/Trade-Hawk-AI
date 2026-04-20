@@ -3,7 +3,7 @@ import pandas as pd
 
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
-from ml_model import train_model, predict_signal, calculate_accuracy
+from ml_model import train_model, predict_signal, predict_next_3, calculate_accuracy
 
 
 st.set_page_config(layout="wide")
@@ -85,7 +85,16 @@ st.subheader(f"📊 Mode: {mode_text}")
 
 st.subheader(f"📈 Signal: {final_signal}")
 
+# ================= NEXT 3 CANDLES =================
+if model is not None:
+    preds = predict_next_3(model, df)
 
+    st.markdown("### 🔮 Next 3 Candle Prediction")
+
+    for p in preds:
+        st.write(
+            f"Candle {p['candle']} → {p['direction']} @ {p['expected_price']}"
+        )
 # ================= TRADE INFO =================
 col1, col2, col3 = st.columns(3)
 
