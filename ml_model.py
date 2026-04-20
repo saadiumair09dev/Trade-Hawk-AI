@@ -91,3 +91,31 @@ def predict_next_3(model, df):
 
     except:
         return []
+
+# ================= NEXT 3 CANDLE PREDICTION =================
+def predict_next_3(model, df):
+    try:
+        df = df.copy()
+
+        # features same as training
+        features = df[["close", "EMA_9", "EMA_21", "RSI"]].dropna()
+
+        if len(features) < 10:
+            return ["NA", "NA", "NA"]
+
+        last = features.iloc[-1:].values
+
+        preds = []
+
+        for _ in range(3):
+            pred = model.predict(last)[0]
+
+            if pred == 1:
+                preds.append("UP")
+            else:
+                preds.append("DOWN")
+
+        return preds
+
+    except Exception as e:
+        return ["ERR", "ERR", "ERR"]
