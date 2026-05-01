@@ -1,5 +1,5 @@
 import streamlit as st
-
+import time
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
 from ml_model import predict_next, predict_multi, calculate_accuracy
