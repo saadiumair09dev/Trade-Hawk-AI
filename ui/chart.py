@@ -1,3 +1,32 @@
+# ================= AUTO REFRESH =================
+refresh_rate = st.slider("⏱ Refresh Speed (sec)", 1, 10, 2)
+
+placeholder = st.empty()
+
+while True:
+    with placeholder.container():
+
+        df = get_data(symbol, interval)
+
+        if df is None or df.empty:
+            st.error("❌ Data fetch failed")
+            break
+
+        df = add_indicators(df)
+
+        # ===== SIGNAL =====
+        if mode == "ML Mode":
+            signal, confidence = predict_next(df)
+        else:
+            signal, confidence, _ = generate_signal(df, mode)
+
+        st.write(f"📡 Live Signal: {signal} ({confidence}%)")
+
+        st.line_chart(df["close"])
+
+    time.sleep(refresh_rate)
+    st.rerun()
+    
 import plotly.graph_objects as go
 
 def plot_chart(df, signal=None):
