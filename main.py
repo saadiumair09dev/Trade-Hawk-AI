@@ -158,3 +158,41 @@ while True:
 
     time.sleep(refresh_rate)
     st.rerun()
+# ================= KAL KA EOD =================
+st.subheader("📅 Yesterday EOD Report")
+
+import pandas as pd
+from datetime import datetime, timedelta
+
+trades = load_trades()
+
+if not trades.empty:
+    # time column को datetime बनाओ (safe)
+    if "time" in trades.columns:
+        trades["time"] = pd.to_datetime(trades["time"], errors="coerce")
+
+    # कल की date
+    yesterday = (datetime.now() - timedelta(days=1)).date()
+
+    # सिर्फ कल के trades
+    y_trades = trades[trades["time"].dt.date == yesterday]
+
+    if not y_trades.empty:
+        closed = y_trades[y_trades["result"] != "OPEN"]
+
+        total = len(closed)
+        wins = len(closed[closed["result"] == "WIN"])
+        losses = len(closed[closed["result"] == "LOSS"])
+
+        strike = round((wins / total) * 100, 2) if total > 0 else 0
+
+        st.write(f"📊 Total Trades: {total}")
+        st.write(f"✅ Wins: {wins}")
+        st.write(f"❌ Losses: {losses}")
+        st.write(f"🎯 Strike Rate: {strike}%")
+
+        st.dataframe(y_trades.tail(20))
+    else:
+        st.write("No trades found for yesterday")
+else:
+    st.write("No trade data available")
