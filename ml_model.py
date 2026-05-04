@@ -3,29 +3,44 @@ import streamlit as st
 from sklearn.ensemble import RandomForestClassifier
 
 
-# ================= FEATURE =================
+# ================= FEATURE ENGINEERING =================
 def prepare_features(df):
+
     df = df.copy()
 
-    required_cols = ["close", "EMA_9", "EMA_21", "RSI", "volume"]
+    required_cols = [
+        "close",
+        "EMA_9",
+        "EMA_21",
+        "RSI",
+        "volume"
+    ]
 
     for col in required_cols:
         if col not in df.columns:
             return pd.DataFrame()
 
     df["return"] = df["close"].pct_change()
-    df["ema_diff"] = df["EMA_9"] - df["EMA_21"]
+
+    df["ema_diff"] = (
+        df["EMA_9"] - df["EMA_21"]
+    )
+
     df["rsi"] = df["RSI"]
+
     df["vol"] = df["volume"]
 
-    df["target"] = (df["close"].shift(-1) > df["close"]).astype(int)
+    # Target
+    df["target"] = (
+        df["close"].shift(-1) > df["close"]
+    ).astype(int)
 
     df = df.dropna()
 
     return df
 
 
-# ================= TRAIN (CACHED) =================
+# ================= MODEL TRAINING =================
 @st.cache_resource(ttl=300)
 def train_model_cached(data_json):
 
@@ -34,9 +49,15 @@ def train_model_cached(data_json):
     if df.empty or len(df) < 20:
         return None, None
 
-    features = ["return", "ema_diff", "rsi", "vol"]
+    features = [
+        "return",
+        "ema_diff",
+        "rsi",
+        "vol"
+    ]
 
     X = df[features]
+
     y = df["target"]
 
     model = RandomForestClassifier(
@@ -58,10 +79,12 @@ def train_model(df):
 
     data_json = df.to_json()
 
-    return train_model_cached(data_json)
+    return train_model_cached(
+        data_json
+    )
 
 
-# ================= SINGLE =================
+# ================= SINGLE PREDICTION =================
 def predict_next(df):
 
     model, features = train_model(df)
@@ -74,45 +97,125 @@ def predict_next(df):
     latest = df.iloc[-1:]
 
     try:
+
         X_live = latest[features]
 
-        pred = model.predict(X_live)[0]
+        pred = model.predict(
+            X_live
+        )[0]
 
-        prob = model.predict_proba(X_live)[0]
+        prob = model.predict_proba(
+            X_live
+        )[0]
 
-        confidence = round(max(prob) * 100, 2)
+        confidence = round(
+            max(prob) * 100,
+            2
+        )
 
-        return ("BUY", confidence) if pred == 1 else ("SELL", confidence)
+        if pred == 1:
+            return "BUY", confidence
+        else:
+            return "SELL", confidence
 
     except:
         return "WAIT", 0
 
 
-# ================= MULTI =================
+# ================= MULTI CANDLE PREDICTION =================
 def predict_multi(df, steps=3):
 
     results = []
 
     temp_df = df.copy()
 
+    previous_signal = None
+
     for _ in range(steps):
 
-        signal, conf = predict_next(temp_df)
+        signal, conf = predict_next(
+            temp_df
+        )
 
-        results.append((signal, conf))
+        label = "😴 Sideways"
 
+        # ===== REVERSAL =====
+        if previous_signal is not None:
+
+            if previous_signal != signal:
+                label = "↩️ Reversal Signal"
+
+        # ===== BUY SIDE =====
+        if signal == "BUY":
+
+            if conf >= 85:
+                label = "🚀 Breakout Move"
+
+            elif conf >= 75:
+                label = "🔥 Strong Bullish"
+
+            elif conf >= 60:
+                label = "🐂 Bullish"
+
+            else:
+                label = "⚠️ Weak Bullish"
+
+        # ===== SELL SIDE =====
+        elif signal == "SELL":
+
+            if conf >= 85:
+                label = "⚠️ Fake Breakout Trap"
+
+            elif conf >= 75:
+                label = "🔥 Strong Bearish"
+
+            elif conf >= 60:
+                label = "🐻 Bearish"
+
+            else:
+                label = "⚠️ Weak Bearish"
+
+        # ===== LOW CONFIDENCE =====
+        if conf < 50:
+            label = "😴 Sideways"
+
+        results.append(
+            (label, conf)
+        )
+
+        previous_signal = signal
+
+        # ===== SIMULATE NEXT =====
         if temp_df.empty:
             break
 
-        last_close = temp_df["close"].iloc[-1]
+        last_close = temp_df[
+            "close"
+        ].iloc[-1]
 
-        new_close = last_close * (
-            1.001 if signal == "BUY" else 0.999
+        if signal == "BUY":
+
+            new_close = (
+                last_close * 1.001
+            )
+
+        elif signal == "SELL":
+
+            new_close = (
+                last_close * 0.999
+            )
+
+        else:
+
+            new_close = last_close
+
+        new_row = temp_df.iloc[
+            -1:
+        ].copy()
+
+        new_row["close"] = (
+            new_close
         )
-
-        new_row = temp_df.iloc[-1:].copy()
-
-        new_row["close"] = new_close
 
         temp_df = pd.concat(
             [temp_df, new_row]
@@ -123,6 +226,6 @@ def predict_multi(df, steps=3):
 
 # ================= ACCURACY =================
 @st.cache_data(ttl=300)
-def calculate_accuracy(_):
+def calculate_accuracy(_df):
 
     return 72.5
