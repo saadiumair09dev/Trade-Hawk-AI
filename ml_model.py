@@ -1,5 +1,6 @@
 import pandas as pd
 import streamlit as st
+from io import StringIO
 from sklearn.ensemble import RandomForestClassifier
 
 
@@ -30,7 +31,6 @@ def prepare_features(df):
 
     df["vol"] = df["volume"]
 
-    # Target
     df["target"] = (
         df["close"].shift(-1) > df["close"]
     ).astype(int)
@@ -40,11 +40,14 @@ def prepare_features(df):
     return df
 
 
-# ================= MODEL TRAINING =================
+# ================= TRAIN CACHED =================
 @st.cache_resource(ttl=300)
 def train_model_cached(data_json):
 
-    df = pd.read_json(data_json)
+    # FIX: string buffer
+    df = pd.read_json(
+        StringIO(data_json)
+    )
 
     if df.empty or len(df) < 20:
         return None, None
@@ -84,7 +87,7 @@ def train_model(df):
     )
 
 
-# ================= SINGLE PREDICTION =================
+# ================= SINGLE PRED =================
 def predict_next(df):
 
     model, features = train_model(df)
@@ -115,14 +118,16 @@ def predict_next(df):
 
         if pred == 1:
             return "BUY", confidence
+
         else:
             return "SELL", confidence
 
     except:
+
         return "WAIT", 0
 
 
-# ================= MULTI CANDLE PREDICTION =================
+# ================= MULTI CANDLE =================
 def predict_multi(df, steps=3):
 
     results = []
@@ -139,13 +144,11 @@ def predict_multi(df, steps=3):
 
         label = "😴 Sideways"
 
-        # ===== REVERSAL =====
         if previous_signal is not None:
 
             if previous_signal != signal:
                 label = "↩️ Reversal Signal"
 
-        # ===== BUY SIDE =====
         if signal == "BUY":
 
             if conf >= 85:
@@ -160,7 +163,6 @@ def predict_multi(df, steps=3):
             else:
                 label = "⚠️ Weak Bullish"
 
-        # ===== SELL SIDE =====
         elif signal == "SELL":
 
             if conf >= 85:
@@ -175,7 +177,6 @@ def predict_multi(df, steps=3):
             else:
                 label = "⚠️ Weak Bearish"
 
-        # ===== LOW CONFIDENCE =====
         if conf < 50:
             label = "😴 Sideways"
 
@@ -185,7 +186,6 @@ def predict_multi(df, steps=3):
 
         previous_signal = signal
 
-        # ===== SIMULATE NEXT =====
         if temp_df.empty:
             break
 
