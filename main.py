@@ -4,16 +4,34 @@ import time
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
 from ml_model import predict_next, predict_multi, calculate_accuracy
-from trade_logger import log_trade, load_trades, update_results, calculate_strike_rate
+from trade_logger import (
+    log_trade,
+    load_trades,
+    update_results,
+    calculate_strike_rate
+)
 
 
 # ================= PAGE =================
-st.set_page_config(page_title="Trade Hawk AI PRO", layout="wide")
-st.title("📈 Trade Hawk AI PRO (Live Mode)")
+st.set_page_config(
+    page_title="Trade Hawk AI PRO",
+    layout="wide"
+)
+
+st.title("📈 Trade Hawk AI PRO")
 
 
-# ================= SETTINGS =================
-refresh_rate = st.slider("⏱ Refresh Speed (sec)", 1, 10, 2)
+# ================= AUTO REFRESH =================
+refresh_rate = st.slider(
+    "Refresh Speed (sec)",
+    2,
+    15,
+    5
+)
+
+# Safe refresh
+if "last_refresh" not in st.session_state:
+    st.session_state.last_refresh = time.time()
 
 
 # ================= ALERT MEMORY =================
@@ -21,48 +39,90 @@ if "last_signal" not in st.session_state:
     st.session_state.last_signal = None
 
 
-# ================= ALERT =================
+# ================= SIGNAL ALERT =================
 def trigger_alert(signal):
+
     if signal not in ["BUY", "SELL"]:
         return
 
-    if st.session_state.last_signal == signal:
+    if signal == st.session_state.last_signal:
         return
 
     st.session_state.last_signal = signal
 
-    for _ in range(3):
-        st.audio("https://www.soundjay.com/buttons/beep-07.mp3")
+    st.audio(
+        "https://www.soundjay.com/buttons/beep-07.mp3"
+    )
 
-    st.markdown("""
-    <script>
-    if (navigator.vibrate) {
-        navigator.vibrate([300,200,300]);
-    }
-    </script>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        """
+        <script>
+        if (navigator.vibrate){
+            navigator.vibrate([300,200,300]);
+        }
+        </script>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 # ================= SL TP =================
 def calculate_sl_tp(price, signal):
+
     if signal == "BUY":
-        return round(price * 0.995, 2), round(price * 1.01, 2)
+
+        sl = round(
+            price * 0.995,
+            2
+        )
+
+        tp = round(
+            price * 1.01,
+            2
+        )
+
+        return sl, tp
+
     elif signal == "SELL":
-        return round(price * 1.005, 2), round(price * 0.99, 2)
+
+        sl = round(
+            price * 1.005,
+            2
+        )
+
+        tp = round(
+            price * 0.99,
+            2
+        )
+
+        return sl, tp
+
     return None, None
 
 
 # ================= INPUT =================
 symbol = st.selectbox(
     "Select Symbol",
-    ["^NSEI", "^BANKNIFTY", "RELIANCE.NS", "HDFCBANK.NS"]
+    [
+        "^NSEI",
+        "^BANKNIFTY",
+        "RELIANCE.NS",
+        "HDFCBANK.NS"
+    ]
 )
 
 interval = st.selectbox(
     "Timeframe",
-    ["1m", "5m", "15m", "1h"]
+    [
+        "1m",
+        "5m",
+        "15m",
+        "1h"
+    ]
 )
 
+
+# ================= MODE =================
 mode_options = {
     "⚡ Scalping": "Scalping",
     "⚖️ Balanced": "Balanced",
@@ -72,127 +132,185 @@ mode_options = {
     "🧠 ML Mode": "ML Mode"
 }
 
-selected_label = st.selectbox("Trading Mode", list(mode_options.keys()))
+selected_label = st.selectbox(
+    "Trading Mode",
+    list(mode_options.keys())
+)
+
 mode = mode_options[selected_label]
 
-st.info(f"📌 Selected Mode: {selected_label}")
+st.info(
+    f"📌 Mode: {selected_label}"
+)
 
 
-# ================= LIVE LOOP =================
-placeholder = st.empty()
+# ================= DATA =================
+df = get_data(
+    symbol,
+    interval
+)
 
-while True:
-    with placeholder.container():
+if df is None or df.empty:
 
-        # ===== DATA =====
-        df = get_data(symbol, interval)
+    st.error(
+        "❌ Data fetch failed"
+    )
 
-        if df is None or df.empty:
-            st.error("❌ Data fetch failed")
-            break
+    st.stop()
 
-        df = add_indicators(df)
 
-        # ===== ACCURACY =====
-        accuracy = calculate_accuracy(df)
-        st.info(f"📊 Accuracy: {accuracy}%")
+df = add_indicators(df)
 
-        # ===== SIGNAL =====
-        signal = "WAIT"
-        confidence = 0
 
-        if mode == "ML Mode":
-            signal, confidence = predict_next(df)
-        else:
-            signal, confidence, _ = generate_signal(df, mode)
+# ================= ACCURACY =================
+accuracy = calculate_accuracy(df)
 
-        # ===== SHOW SIGNAL =====
-        if signal == "BUY":
-            st.success(f"🚀 BUY ({confidence}%)")
-        elif signal == "SELL":
-            st.error(f"🔻 SELL ({confidence}%)")
-        else:
-            st.warning("⏳ WAIT")
+st.info(
+    f"📊 Accuracy: {accuracy}%"
+)
 
-        # ===== ALERT =====
-        trigger_alert(signal)
 
-        # ===== TRADE LOG =====
-        price = df["close"].iloc[-1]
+# ================= SIGNAL =================
+signal = "WAIT"
 
-        if signal in ["BUY", "SELL"]:
-            log_trade(signal, price)
+confidence = 0
 
-        trades = update_results(price)
+if mode == "ML Mode":
 
-        # ===== STRIKE RATE =====
-        strike = calculate_strike_rate(trades)
-        st.info(f"🎯 Strike Rate: {strike}%")
+    signal, confidence = predict_next(
+        df
+    )
 
-        # ===== SL TP =====
-        sl, tp = calculate_sl_tp(price, signal)
+else:
 
-        if sl and tp:
-            st.write(f"Entry: {round(price,2)}")
-            st.success(f"TP: {tp}")
-            st.error(f"SL: {sl}")
+    signal, confidence, reasons = generate_signal(
+        df,
+        mode
+    )
 
-        # ===== MULTI =====
-        st.subheader("🔮 Next 3 Candles")
 
-        try:
-            multi = predict_multi(df, 3)
-            for i, (sig, conf) in enumerate(multi):
-                st.write(f"{i+1}: {sig} ({conf}%)")
-        except:
-            pass
+# ================= SIGNAL UI =================
+if signal == "BUY":
 
-        # ===== TRADE LOG =====
-        st.subheader("📒 Trade Log")
-        if not trades.empty:
-            st.dataframe(trades.tail(20))
+    st.success(
+        f"🚀 BUY ({confidence}%)"
+    )
 
-        # ===== CHART =====
-        st.subheader("📉 Live Chart")
-        st.line_chart(df["close"])
+elif signal == "SELL":
 
-    time.sleep(refresh_rate)
-    st.rerun()
-# ================= KAL KA EOD =================
-st.subheader("📅 Yesterday EOD Report")
+    st.error(
+        f"🔻 SELL ({confidence}%)"
+    )
 
-import pandas as pd
-from datetime import datetime, timedelta
+else:
 
-trades = load_trades()
+    st.warning(
+        "⏳ WAIT"
+    )
+
+
+# ================= ALERT =================
+trigger_alert(
+    signal
+)
+
+
+# ================= TRADE =================
+price = df[
+    "close"
+].iloc[-1]
+
+
+# Avoid duplicate logs
+if signal != st.session_state.last_signal:
+
+    if signal in ["BUY", "SELL"]:
+
+        log_trade(
+            signal,
+            price
+        )
+
+
+# ================= UPDATE LOG =================
+trades = update_results(
+    price
+)
+
+
+# ================= STRIKE RATE =================
+strike = calculate_strike_rate(
+    trades
+)
+
+st.info(
+    f"🎯 Strike Rate: {strike}%"
+)
+
+
+# ================= SL TP =================
+sl, tp = calculate_sl_tp(
+    price,
+    signal
+)
+
+if sl and tp:
+
+    st.write(
+        f"Entry: {round(price,2)}"
+    )
+
+    st.success(
+        f"TP: {tp}"
+    )
+
+    st.error(
+        f"SL: {sl}"
+    )
+
+
+# ================= MULTI CANDLE =================
+st.subheader(
+    "🔮 Next 3 Candles"
+)
+
+try:
+
+    multi = predict_multi(
+        df,
+        3
+    )
+
+    for i, (label, conf) in enumerate(multi):
+
+        st.write(
+            f"{i+1}: {label} ({conf}%)"
+        )
+
+except:
+
+    st.warning(
+        "Prediction unavailable"
+    )
+
+
+# ================= TRADE LOG =================
+st.subheader(
+    "📒 Trade Log"
+)
 
 if not trades.empty:
-    # time column को datetime बनाओ (safe)
-    if "time" in trades.columns:
-        trades["time"] = pd.to_datetime(trades["time"], errors="coerce")
 
-    # कल की date
-    yesterday = (datetime.now() - timedelta(days=1)).date()
+    st.dataframe(
+        trades.tail(20)
+    )
 
-    # सिर्फ कल के trades
-    y_trades = trades[trades["time"].dt.date == yesterday]
 
-    if not y_trades.empty:
-        closed = y_trades[y_trades["result"] != "OPEN"]
+# ================= CHART =================
+st.subheader(
+    "📉 Live Chart"
+)
 
-        total = len(closed)
-        wins = len(closed[closed["result"] == "WIN"])
-        losses = len(closed[closed["result"] == "LOSS"])
-
-        strike = round((wins / total) * 100, 2) if total > 0 else 0
-
-        st.write(f"📊 Total Trades: {total}")
-        st.write(f"✅ Wins: {wins}")
-        st.write(f"❌ Losses: {losses}")
-        st.write(f"🎯 Strike Rate: {strike}%")
-
-        st.dataframe(y_trades.tail(20))
-    else:
-        st.write("No trades found for yesterday")
-else:
-    st.write("No trade data available")
+st.line_chart(
+    df["close"]
+)
