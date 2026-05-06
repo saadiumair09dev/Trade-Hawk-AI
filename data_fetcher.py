@@ -28,13 +28,15 @@ def is_market_open():
     start = now.replace(
         hour=9,
         minute=15,
-        second=0
+        second=0,
+        microsecond=0
     )
 
     end = now.replace(
         hour=15,
         minute=30,
-        second=0
+        second=0,
+        microsecond=0
     )
 
     return start <= now <= end
@@ -66,6 +68,12 @@ def fetch_dhan(
 
     try:
 
+        # .NS remove for Dhan
+        clean_symbol = symbol.replace(
+            ".NS",
+            ""
+        )
+
         token = st.secrets[
             "dhan"
         ][
@@ -84,17 +92,19 @@ def fetch_dhan(
 
                 "securityId": "2885",
                 "exchangeSegment": "NSE_EQ"
+
             },
 
             "HDFCBANK": {
 
                 "securityId": "1333",
                 "exchangeSegment": "NSE_EQ"
+
             }
 
         }
 
-        if symbol not in symbol_map:
+        if clean_symbol not in symbol_map:
 
             return None
 
@@ -111,14 +121,14 @@ def fetch_dhan(
 
             "securityId":
             symbol_map[
-                symbol
+                clean_symbol
             ][
                 "securityId"
             ],
 
             "exchangeSegment":
             symbol_map[
-                symbol
+                clean_symbol
             ][
                 "exchangeSegment"
             ],
@@ -151,10 +161,15 @@ def fetch_dhan(
         }
 
         res = requests.post(
+
             BASE_URL,
+
             json=payload,
+
             headers=headers,
+
             timeout=8
+
         )
 
         if res.status_code != 200:
@@ -218,10 +233,13 @@ def fetch_dhan(
         df[
             "datetime"
         ] = pd.to_datetime(
+
             df[
                 "datetime"
             ],
+
             errors="coerce"
+
         )
 
         df.dropna(
@@ -229,8 +247,11 @@ def fetch_dhan(
         )
 
         df.set_index(
+
             "datetime",
+
             inplace=True
+
         )
 
         return df
@@ -240,9 +261,8 @@ def fetch_dhan(
         return None
 
 
-# ================= YFINANCE =================
+# ================= YAHOO =================
 @st.cache_data(ttl=20)
-
 def fetch_yfinance(
     symbol,
     interval
@@ -271,7 +291,9 @@ def fetch_yfinance(
 
             period=period,
 
-            progress=False
+            progress=False,
+
+            threads=False
 
         )
 
@@ -315,20 +337,20 @@ def fetch_yfinance(
 
 # ================= STOOQ =================
 @st.cache_data(ttl=20)
-
 def fetch_stooq(
     symbol
 ):
 
     try:
 
-        symbol = normalize_symbol(
-            symbol
+        clean_symbol = symbol.replace(
+            ".NS",
+            ""
         )
 
         url = (
             "https://stooq.com/q/d/l/"
-            f"?s={symbol.lower()}"
+            f"?s={clean_symbol.lower()}"
             "&i=d"
         )
 
@@ -351,14 +373,19 @@ def fetch_stooq(
         df[
             "date"
         ] = pd.to_datetime(
+
             df[
                 "date"
             ]
+
         )
 
         df.set_index(
+
             "date",
+
             inplace=True
+
         )
 
         return df
@@ -388,7 +415,8 @@ def get_data(
             "🌙 Market Closed"
         )
 
-    # index
+
+    # ================= INDEX =================
     if symbol.startswith("^"):
 
         df = fetch_yfinance(
@@ -399,12 +427,25 @@ def get_data(
         if df is not None:
 
             st.info(
-                "Index data: Yahoo"
+                "📊 Index Source: Yahoo"
             )
 
             return df
 
-    # dhan
+        df = fetch_stooq(
+            symbol
+        )
+
+        if df is not None:
+
+            st.info(
+                "🌐 Index Source: Stooq"
+            )
+
+            return df
+
+
+    # ================= DHAN =================
     if market_open:
 
         df = fetch_dhan(
@@ -415,12 +456,13 @@ def get_data(
         if df is not None:
 
             st.success(
-                "⚡ Dhan Live"
+                "⚡ Live Source: Dhan"
             )
 
             return df
 
-    # yahoo
+
+    # ================= YAHOO =================
     df = fetch_yfinance(
         symbol,
         interval
@@ -429,12 +471,13 @@ def get_data(
     if df is not None:
 
         st.info(
-            "📊 Yahoo Source"
+            "📊 Source: Yahoo"
         )
 
         return df
 
-    # stooq
+
+    # ================= STOOQ =================
     df = fetch_stooq(
         symbol
     )
@@ -442,10 +485,11 @@ def get_data(
     if df is not None:
 
         st.info(
-            "🌐 Stooq Source"
+            "🌐 Source: Stooq"
         )
 
         return df
+
 
     st.error(
         "❌ No source available"
