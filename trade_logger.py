@@ -198,9 +198,17 @@ def update_results(current_price):
 
 
 # ================= STRIKE =================
+# ================= STRIKE =================
 def calculate_strike_rate(df):
 
+    # None safety
+    if df is None:
+
+        return 0
+
+    # empty safety
     if df.empty:
+
         return 0
 
     closed = df[
@@ -213,6 +221,7 @@ def calculate_strike_rate(df):
     ]
 
     if closed.empty:
+
         return 0
 
     wins = len(
@@ -224,6 +233,10 @@ def calculate_strike_rate(df):
     total = len(
         closed
     )
+
+    if total == 0:
+
+        return 0
 
     return round(
         (wins / total) * 100,
