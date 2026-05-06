@@ -1,85 +1,231 @@
-import pandas as pd
 import os
+import pandas as pd
+from datetime import datetime
 
-FILE = "trade_log.csv"
+LOG_FILE = "trade_log.csv"
 
 
-# ================= SAVE TRADE =================
-def log_trade(signal, price):
-    data = {
-        "time": pd.Timestamp.now(),
-        "signal": signal,
-        "entry_price": price,
-        "exit_price": None,
-        "result": "OPEN"
-    }
+# ================= INIT =================
+def _create_if_missing():
 
-    df = pd.DataFrame([data])
+    if not os.path.exists(LOG_FILE):
 
-    if os.path.exists(FILE):
-        df.to_csv(FILE, mode='a', header=False, index=False)
-    else:
-        df.to_csv(FILE, index=False)
+        df = pd.DataFrame(
+            columns=[
+                "time",
+                "signal",
+                "entry",
+                "sl",
+                "tp",
+                "exit",
+                "result"
+            ]
+        )
+
+        df.to_csv(
+            LOG_FILE,
+            index=False
+        )
 
 
 # ================= LOAD =================
 def load_trades():
-    if os.path.exists(FILE):
-        return pd.read_csv(FILE)
-    return pd.DataFrame()
+
+    _create_if_missing()
+
+    try:
+
+        df = pd.read_csv(
+            LOG_FILE
+        )
+
+        return df
+
+    except:
+
+        return pd.DataFrame()
 
 
-# ================= UPDATE RESULT =================
+# ================= LOG =================
+def log_trade(signal, entry):
+
+    _create_if_missing()
+
+    df = load_trades()
+
+    # duplicate block
+    if not df.empty:
+
+        last = df.iloc[-1]
+
+        if (
+            last["signal"] == signal
+            and last["result"] == "OPEN"
+        ):
+
+            return
+
+    # SL TP
+    if signal == "BUY":
+
+        sl = round(
+            entry * 0.995,
+            2
+        )
+
+        tp = round(
+            entry * 1.01,
+            2
+        )
+
+    else:
+
+        sl = round(
+            entry * 1.005,
+            2
+        )
+
+        tp = round(
+            entry * 0.99,
+            2
+        )
+
+    new_trade = pd.DataFrame(
+        [
+            {
+                "time": datetime.now(),
+                "signal": signal,
+                "entry": entry,
+                "sl": sl,
+                "tp": tp,
+                "exit": None,
+                "result": "OPEN"
+            }
+        ]
+    )
+
+    df = pd.concat(
+        [df, new_trade]
+    )
+
+    df.to_csv(
+        LOG_FILE,
+        index=False
+    )
+
+
+# ================= UPDATE =================
 def update_results(current_price):
+
     df = load_trades()
 
     if df.empty:
         return df
 
-    updated = False
-
     for i in range(len(df)):
-        if df.loc[i, "result"] == "OPEN":
-            entry = df.loc[i, "entry_price"]
-            signal = df.loc[i, "signal"]
 
-            if signal == "BUY":
-                if current_price > entry:
-                    df.loc[i, "result"] = "WIN"
-                    df.loc[i, "exit_price"] = current_price
-                    updated = True
-                elif current_price < entry:
-                    df.loc[i, "result"] = "LOSS"
-                    df.loc[i, "exit_price"] = current_price
-                    updated = True
+        row = df.iloc[i]
 
-            elif signal == "SELL":
-                if current_price < entry:
-                    df.loc[i, "result"] = "WIN"
-                    df.loc[i, "exit_price"] = current_price
-                    updated = True
-                elif current_price > entry:
-                    df.loc[i, "result"] = "LOSS"
-                    df.loc[i, "exit_price"] = current_price
-                    updated = True
+        if row["result"] != "OPEN":
+            continue
 
-    if updated:
-        df.to_csv(FILE, index=False)
+        signal = row["signal"]
+
+        entry = row["entry"]
+
+        sl = row["sl"]
+
+        tp = row["tp"]
+
+        if signal == "BUY":
+
+            if current_price >= tp:
+
+                df.at[
+                    i,
+                    "result"
+                ] = "WIN"
+
+                df.at[
+                    i,
+                    "exit"
+                ] = current_price
+
+            elif current_price <= sl:
+
+                df.at[
+                    i,
+                    "result"
+                ] = "LOSS"
+
+                df.at[
+                    i,
+                    "exit"
+                ] = current_price
+
+        elif signal == "SELL":
+
+            if current_price <= tp:
+
+                df.at[
+                    i,
+                    "result"
+                ] = "WIN"
+
+                df.at[
+                    i,
+                    "exit"
+                ] = current_price
+
+            elif current_price >= sl:
+
+                df.at[
+                    i,
+                    "result"
+                ] = "LOSS"
+
+                df.at[
+                    i,
+                    "exit"
+                ] = current_price
+
+    df.to_csv(
+        LOG_FILE,
+        index=False
+    )
 
     return df
 
 
-# ================= STRIKE RATE =================
+# ================= STRIKE =================
 def calculate_strike_rate(df):
+
     if df.empty:
         return 0
 
-    closed = df[df["result"] != "OPEN"]
+    closed = df[
+        df["result"].isin(
+            [
+                "WIN",
+                "LOSS"
+            ]
+        )
+    ]
 
     if closed.empty:
         return 0
 
-    wins = len(closed[closed["result"] == "WIN"])
-    total = len(closed)
+    wins = len(
+        closed[
+            closed["result"] == "WIN"
+        ]
+    )
 
-    return round((wins / total) * 100, 2)
+    total = len(
+        closed
+    )
+
+    return round(
+        (wins / total) * 100,
+        2
+    )
