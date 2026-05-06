@@ -1,18 +1,25 @@
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
 
 from ml_model import (
     predict_next,
-    predict_multi,
-    calculate_accuracy
+    predict_multi
 )
 
 from trade_logger import (
     log_trade,
     update_results,
     calculate_strike_rate
+)
+
+
+# ================= AUTO REFRESH =================
+st_autorefresh(
+    interval=15000,
+    key="hawk_refresh"
 )
 
 
@@ -36,17 +43,17 @@ def trigger_alert(signal):
     if signal not in ["BUY", "SELL"]:
         return
 
-    # repeat until changed
+    # repeat only on new signal
     if signal == st.session_state.last_signal:
         return
 
     st.session_state.last_signal = signal
 
-    if signal == "BUY":
+    st.audio(
+        "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
+    )
 
-        st.audio(
-            "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
-        )
+    if signal == "BUY":
 
         st.markdown(
             """
@@ -54,15 +61,11 @@ def trigger_alert(signal):
             let msg = new SpeechSynthesisUtterance(
             "Buy Buy Buy"
             );
-
             msg.rate = 0.9;
-
             speechSynthesis.speak(msg);
 
             if(navigator.vibrate){
-                navigator.vibrate(
-                    [400,200,400]
-                );
+                navigator.vibrate([400,200,400]);
             }
             </script>
             """,
@@ -71,25 +74,17 @@ def trigger_alert(signal):
 
     elif signal == "SELL":
 
-        st.audio(
-            "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
-        )
-
         st.markdown(
             """
             <script>
             let msg = new SpeechSynthesisUtterance(
             "Sell Sell Sell"
             );
-
             msg.rate = 0.9;
-
             speechSynthesis.speak(msg);
 
             if(navigator.vibrate){
-                navigator.vibrate(
-                    [400,200,400]
-                );
+                navigator.vibrate([400,200,400]);
             }
             </script>
             """,
@@ -123,17 +118,32 @@ interval = st.selectbox(
 
 # ================= MODE =================
 mode_options = {
-    "⚡ Scalping": "Scalping",
-    "⚖️ Balanced": "Balanced",
-    "🎯 Strict": "Strict",
-    "🔀 Hybrid": "Hybrid",
-    "🤖 AI Mode": "AI Mode",
-    "🧠 ML Mode": "ML Mode"
+
+    "⚡ Scalping":
+    "Scalping",
+
+    "⚖️ Balanced":
+    "Balanced",
+
+    "🎯 Strict":
+    "Strict",
+
+    "🔀 Hybrid":
+    "Hybrid",
+
+    "🤖 AI Mode":
+    "AI Mode",
+
+    "🧠 ML Mode":
+    "ML Mode"
+
 }
 
 selected_label = st.selectbox(
     "Trading Mode",
-    list(mode_options.keys())
+    list(
+        mode_options.keys()
+    )
 )
 
 mode = mode_options[
@@ -163,8 +173,24 @@ df = add_indicators(
     df
 )
 
-# ================= MODE ACCURACY =================
 
+# ================= TRADE UPDATE =================
+price = df[
+    "close"
+].iloc[-1]
+
+trades = update_results(
+    price
+)
+
+
+# ================= STRIKE =================
+strike_rate = calculate_strike_rate(
+    trades
+)
+
+
+# ================= MODE ACCURACY =================
 mode_expected_accuracy = {
 
     "Scalping": "52–58%",
@@ -181,33 +207,31 @@ expected_accuracy = mode_expected_accuracy.get(
     "N/A"
 )
 
-# Live strike from logs
-strike_rate = calculate_strike_rate(
-    trades if 'trades' in locals() else None
-)
-
 st.info(
     f"""
-📌 Mode: {selected_label}
-
 🎯 Expected Accuracy: {expected_accuracy}
 
 📊 Live Strike Rate: {strike_rate}%
 """
 )
 
+
 # ================= SIGNAL =================
 signal = "WAIT"
-
 confidence = 0
-
 reasons = []
 
 if mode == "ML Mode":
 
-    signal, confidence = predict_next(
-        df
-    )
+    try:
+
+        signal, confidence = predict_next(
+            df
+        )
+
+    except:
+
+        signal = "WAIT"
 
 else:
 
@@ -237,7 +261,7 @@ else:
     )
 
 
-# ================= REASON =================
+# ================= REASONS =================
 if reasons:
 
     st.subheader(
@@ -258,11 +282,7 @@ trigger_alert(
 )
 
 
-# ================= TRADE =================
-price = df[
-    "close"
-].iloc[-1]
-
+# ================= TRADE LOGIC =================
 if signal in [
     "BUY",
     "SELL"
@@ -272,22 +292,6 @@ if signal in [
         signal,
         price
     )
-
-
-# ================= UPDATE =================
-trades = update_results(
-    price
-)
-
-
-# ================= STRIKE =================
-strike_rate = calculate_strike_rate(
-    trades
-)
-
-st.info(
-    f"🎯 Strike Rate: {strike_rate}%"
-)
 
 
 # ================= SL / TP =================
@@ -355,10 +359,28 @@ try:
     for i, (
         label,
         conf
-    ) in enumerate(future):
+    ) in enumerate(
+        future
+    ):
+
+        strength = "Weak"
+
+        if conf >= 80:
+
+            strength = "Strong"
+
+        elif conf >= 65:
+
+            if label == "BUY":
+
+                strength = "Bullish"
+
+            elif label == "SELL":
+
+                strength = "Bearish"
 
         st.write(
-            f"Candle {i+1}: {label} ({conf}%)"
+            f"Candle {i+1}: {label} | {strength} | {conf}%"
         )
 
 except:
@@ -368,15 +390,21 @@ except:
     )
 
 
-# ================= LOG =================
+# ================= TRADE LOG =================
 st.subheader(
     "📒 Trade Log"
 )
 
-if not trades.empty:
+if trades is not None and not trades.empty:
 
     st.dataframe(
         trades.tail(20)
+    )
+
+else:
+
+    st.info(
+        "No trades yet"
     )
 
 
