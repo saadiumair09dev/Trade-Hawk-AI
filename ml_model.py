@@ -18,21 +18,33 @@ def prepare_features(df):
     ]
 
     for col in required_cols:
+
         if col not in df.columns:
+
             return pd.DataFrame()
 
-    df["return"] = df["close"].pct_change()
-
-    df["ema_diff"] = (
-        df["EMA_9"] - df["EMA_21"]
+    # features
+    df["return"] = (
+        df["close"].pct_change()
     )
 
-    df["rsi"] = df["RSI"]
+    df["ema_diff"] = (
+        df["EMA_9"] -
+        df["EMA_21"]
+    )
 
-    df["vol"] = df["volume"]
+    df["rsi"] = (
+        df["RSI"]
+    )
 
+    df["vol"] = (
+        df["volume"]
+    )
+
+    # target
     df["target"] = (
-        df["close"].shift(-1) > df["close"]
+        df["close"].shift(-1) >
+        df["close"]
     ).astype(int)
 
     df = df.dropna()
@@ -40,16 +52,19 @@ def prepare_features(df):
     return df
 
 
-# ================= TRAIN CACHED =================
+# ================= TRAIN =================
 @st.cache_resource(ttl=300)
 def train_model_cached(data_json):
 
-    # FIX: string buffer
     df = pd.read_json(
         StringIO(data_json)
     )
 
-    if df.empty or len(df) < 20:
+    if (
+        df.empty
+        or len(df) < 20
+    ):
+
         return None, None
 
     features = [
@@ -59,25 +74,35 @@ def train_model_cached(data_json):
         "vol"
     ]
 
-    X = df[features]
+    X = df[
+        features
+    ]
 
-    y = df["target"]
+    y = df[
+        "target"
+    ]
 
     model = RandomForestClassifier(
         n_estimators=100,
         random_state=42
     )
 
-    model.fit(X, y)
+    model.fit(
+        X,
+        y
+    )
 
     return model, features
 
 
 def train_model(df):
 
-    df = prepare_features(df)
+    df = prepare_features(
+        df
+    )
 
     if df.empty:
+
         return None, None
 
     data_json = df.to_json()
@@ -87,21 +112,28 @@ def train_model(df):
     )
 
 
-# ================= SINGLE PRED =================
+# ================= SINGLE =================
 def predict_next(df):
 
-    model, features = train_model(df)
+    model, features = train_model(
+        df
+    )
 
     if model is None:
+
         return "WAIT", 0
 
-    df = prepare_features(df)
+    df = prepare_features(
+        df
+    )
 
     latest = df.iloc[-1:]
 
     try:
 
-        X_live = latest[features]
+        X_live = latest[
+            features
+        ]
 
         pred = model.predict(
             X_live
@@ -117,9 +149,11 @@ def predict_next(df):
         )
 
         if pred == 1:
+
             return "BUY", confidence
 
         else:
+
             return "SELL", confidence
 
     except:
@@ -127,8 +161,11 @@ def predict_next(df):
         return "WAIT", 0
 
 
-# ================= MULTI CANDLE =================
-def predict_multi(df, steps=3):
+# ================= MULTI =================
+def predict_multi(
+    df,
+    steps=3
+):
 
     results = []
 
@@ -144,49 +181,69 @@ def predict_multi(df, steps=3):
 
         label = "😴 Sideways"
 
-        if previous_signal is not None:
+        # reversal
+        if (
+            previous_signal
+            and previous_signal != signal
+        ):
 
-            if previous_signal != signal:
-                label = "↩️ Reversal Signal"
+            label = "↩️ Reversal"
 
+        # buy side
         if signal == "BUY":
 
             if conf >= 85:
-                label = "🚀 Breakout Move"
+
+                label = "🚀 Breakout Bullish"
 
             elif conf >= 75:
+
                 label = "🔥 Strong Bullish"
 
             elif conf >= 60:
+
                 label = "🐂 Bullish"
 
             else:
+
                 label = "⚠️ Weak Bullish"
 
+        # sell side
         elif signal == "SELL":
 
             if conf >= 85:
-                label = "⚠️ Fake Breakout Trap"
+
+                label = "💥 Breakdown Bearish"
 
             elif conf >= 75:
+
                 label = "🔥 Strong Bearish"
 
             elif conf >= 60:
+
                 label = "🐻 Bearish"
 
             else:
+
                 label = "⚠️ Weak Bearish"
 
+        # low confidence
         if conf < 50:
+
             label = "😴 Sideways"
 
         results.append(
-            (label, conf)
+            (
+                label,
+                conf
+            )
         )
 
         previous_signal = signal
 
+        # simulate next candle
         if temp_df.empty:
+
             break
 
         last_close = temp_df[
@@ -207,18 +264,23 @@ def predict_multi(df, steps=3):
 
         else:
 
-            new_close = last_close
+            new_close = (
+                last_close
+            )
 
         new_row = temp_df.iloc[
             -1:
         ].copy()
 
-        new_row["close"] = (
-            new_close
-        )
+        new_row[
+            "close"
+        ] = new_close
 
         temp_df = pd.concat(
-            [temp_df, new_row]
+            [
+                temp_df,
+                new_row
+            ]
         )
 
     return results
@@ -226,6 +288,6 @@ def predict_multi(df, steps=3):
 
 # ================= ACCURACY =================
 @st.cache_data(ttl=300)
-def calculate_accuracy(_df):
+def calculate_accuracy(_):
 
     return 72.5
