@@ -1,12 +1,16 @@
 import streamlit as st
-import time
 
 from data_fetcher import get_data
 from indicators.indicators import add_indicators, generate_signal
-from ml_model import predict_next, predict_multi, calculate_accuracy
+
+from ml_model import (
+    predict_next,
+    predict_multi,
+    calculate_accuracy
+)
+
 from trade_logger import (
     log_trade,
-    load_trades,
     update_results,
     calculate_strike_rate
 )
@@ -21,86 +25,79 @@ st.set_page_config(
 st.title("📈 Trade Hawk AI PRO")
 
 
-# ================= AUTO REFRESH =================
-refresh_rate = st.slider(
-    "Refresh Speed (sec)",
-    2,
-    15,
-    5
-)
-
-# Safe refresh
-if "last_refresh" not in st.session_state:
-    st.session_state.last_refresh = time.time()
-
-
-# ================= ALERT MEMORY =================
+# ================= SESSION =================
 if "last_signal" not in st.session_state:
     st.session_state.last_signal = None
 
 
-# ================= SIGNAL ALERT =================
+# ================= ALERT =================
 def trigger_alert(signal):
 
     if signal not in ["BUY", "SELL"]:
         return
 
+    # repeat until changed
     if signal == st.session_state.last_signal:
         return
 
     st.session_state.last_signal = signal
 
-    st.audio(
-        "https://www.soundjay.com/buttons/beep-07.mp3"
-    )
-
-    st.markdown(
-        """
-        <script>
-        if (navigator.vibrate){
-            navigator.vibrate([300,200,300]);
-        }
-        </script>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# ================= SL TP =================
-def calculate_sl_tp(price, signal):
-
     if signal == "BUY":
 
-        sl = round(
-            price * 0.995,
-            2
+        st.audio(
+            "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
         )
 
-        tp = round(
-            price * 1.01,
-            2
-        )
+        st.markdown(
+            """
+            <script>
+            let msg = new SpeechSynthesisUtterance(
+            "Buy Buy Buy"
+            );
 
-        return sl, tp
+            msg.rate = 0.9;
+
+            speechSynthesis.speak(msg);
+
+            if(navigator.vibrate){
+                navigator.vibrate(
+                    [400,200,400]
+                );
+            }
+            </script>
+            """,
+            unsafe_allow_html=True
+        )
 
     elif signal == "SELL":
 
-        sl = round(
-            price * 1.005,
-            2
+        st.audio(
+            "https://actions.google.com/sounds/v1/alarms/beep_short.ogg"
         )
 
-        tp = round(
-            price * 0.99,
-            2
+        st.markdown(
+            """
+            <script>
+            let msg = new SpeechSynthesisUtterance(
+            "Sell Sell Sell"
+            );
+
+            msg.rate = 0.9;
+
+            speechSynthesis.speak(msg);
+
+            if(navigator.vibrate){
+                navigator.vibrate(
+                    [400,200,400]
+                );
+            }
+            </script>
+            """,
+            unsafe_allow_html=True
         )
 
-        return sl, tp
 
-    return None, None
-
-
-# ================= INPUT =================
+# ================= SYMBOL =================
 symbol = st.selectbox(
     "Select Symbol",
     [
@@ -111,8 +108,10 @@ symbol = st.selectbox(
     ]
 )
 
+
+# ================= INTERVAL =================
 interval = st.selectbox(
-    "Timeframe",
+    "Select Timeframe",
     [
         "1m",
         "5m",
@@ -137,10 +136,12 @@ selected_label = st.selectbox(
     list(mode_options.keys())
 )
 
-mode = mode_options[selected_label]
+mode = mode_options[
+    selected_label
+]
 
 st.info(
-    f"📌 Mode: {selected_label}"
+    f"📌 Selected Mode: {selected_label}"
 )
 
 
@@ -158,15 +159,18 @@ if df is None or df.empty:
 
     st.stop()
 
-
-df = add_indicators(df)
+df = add_indicators(
+    df
+)
 
 
 # ================= ACCURACY =================
-accuracy = calculate_accuracy(df)
+accuracy = calculate_accuracy(
+    df
+)
 
 st.info(
-    f"📊 Accuracy: {accuracy}%"
+    f"📊 ML Accuracy: {accuracy}%"
 )
 
 
@@ -174,6 +178,8 @@ st.info(
 signal = "WAIT"
 
 confidence = 0
+
+reasons = []
 
 if mode == "ML Mode":
 
@@ -209,6 +215,21 @@ else:
     )
 
 
+# ================= REASON =================
+if reasons:
+
+    st.subheader(
+        "🧠 Reason"
+    )
+
+    for r in reasons:
+
+        st.write(
+            "•",
+            r
+        )
+
+
 # ================= ALERT =================
 trigger_alert(
     signal
@@ -220,41 +241,69 @@ price = df[
     "close"
 ].iloc[-1]
 
+if signal in [
+    "BUY",
+    "SELL"
+]:
 
-# Avoid duplicate logs
-if signal != st.session_state.last_signal:
-
-    if signal in ["BUY", "SELL"]:
-
-        log_trade(
-            signal,
-            price
-        )
+    log_trade(
+        signal,
+        price
+    )
 
 
-# ================= UPDATE LOG =================
+# ================= UPDATE =================
 trades = update_results(
     price
 )
 
 
-# ================= STRIKE RATE =================
-strike = calculate_strike_rate(
+# ================= STRIKE =================
+strike_rate = calculate_strike_rate(
     trades
 )
 
 st.info(
-    f"🎯 Strike Rate: {strike}%"
+    f"🎯 Strike Rate: {strike_rate}%"
 )
 
 
-# ================= SL TP =================
-sl, tp = calculate_sl_tp(
-    price,
-    signal
-)
+# ================= SL / TP =================
+if signal == "BUY":
+
+    sl = round(
+        price * 0.995,
+        2
+    )
+
+    tp = round(
+        price * 1.01,
+        2
+    )
+
+elif signal == "SELL":
+
+    sl = round(
+        price * 1.005,
+        2
+    )
+
+    tp = round(
+        price * 0.99,
+        2
+    )
+
+else:
+
+    sl = None
+    tp = None
+
 
 if sl and tp:
+
+    st.subheader(
+        "🎯 Trade Setup"
+    )
 
     st.write(
         f"Entry: {round(price,2)}"
@@ -269,22 +318,25 @@ if sl and tp:
     )
 
 
-# ================= MULTI CANDLE =================
+# ================= NEXT CANDLES =================
 st.subheader(
-    "🔮 Next 3 Candles"
+    "🔮 Next 3 Candle Prediction"
 )
 
 try:
 
-    multi = predict_multi(
+    future = predict_multi(
         df,
         3
     )
 
-    for i, (label, conf) in enumerate(multi):
+    for i, (
+        label,
+        conf
+    ) in enumerate(future):
 
         st.write(
-            f"{i+1}: {label} ({conf}%)"
+            f"Candle {i+1}: {label} ({conf}%)"
         )
 
 except:
@@ -294,7 +346,7 @@ except:
     )
 
 
-# ================= TRADE LOG =================
+# ================= LOG =================
 st.subheader(
     "📒 Trade Log"
 )
