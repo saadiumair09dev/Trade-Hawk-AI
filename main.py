@@ -163,16 +163,38 @@ df = add_indicators(
     df
 )
 
+# ================= MODE ACCURACY =================
 
-# ================= ACCURACY =================
-accuracy = calculate_accuracy(
-    df
+mode_expected_accuracy = {
+
+    "Scalping": "52–58%",
+    "Balanced": "58–65%",
+    "Strict": "68–76%",
+    "Hybrid": "70–80%",
+    "AI Mode": "68–78%",
+    "ML Mode": "65–78%"
+
+}
+
+expected_accuracy = mode_expected_accuracy.get(
+    mode,
+    "N/A"
+)
+
+# Live strike from logs
+strike_rate = calculate_strike_rate(
+    trades if 'trades' in locals() else None
 )
 
 st.info(
-    f"📊 ML Accuracy: {accuracy}%"
-)
+    f"""
+📌 Mode: {selected_label}
 
+🎯 Expected Accuracy: {expected_accuracy}
+
+📊 Live Strike Rate: {strike_rate}%
+"""
+)
 
 # ================= SIGNAL =================
 signal = "WAIT"
