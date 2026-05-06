@@ -242,6 +242,7 @@ def fetch_dhan(
 
 # ================= YFINANCE =================
 @st.cache_data(ttl=20)
+
 def fetch_yfinance(
     symbol,
     interval
@@ -313,6 +314,8 @@ def fetch_yfinance(
 
 
 # ================= STOOQ =================
+@st.cache_data(ttl=20)
+
 def fetch_stooq(
     symbol
 ):
