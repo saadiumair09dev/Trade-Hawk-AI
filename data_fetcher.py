@@ -5,6 +5,8 @@ import yfinance as yf
 
 from datetime import datetime
 import pytz
+import time
+import random
 
 
 BASE_URL = "https://api.dhan.co/v2/charts/intraday"
@@ -283,52 +285,86 @@ def fetch_yfinance(
 
             period = "1mo"
 
-        df = yf.download(
+        retries = 5
 
-            tickers=symbol,
+        for attempt in range(retries):
 
-            interval=interval,
+            try:
 
-            period=period,
+                df = yf.download(
 
-            progress=False,
+                    tickers=symbol,
 
-            threads=False
+                    interval=interval,
 
-        )
+                    period=period,
 
-        if df is None or df.empty:
+                    progress=False,
 
-            return None
+                    threads=False
 
-        if isinstance(
-            df.columns,
-            pd.MultiIndex
-        ):
+                )
 
-            df.columns = [
+                if df is None or df.empty:
 
-                c[0].lower()
+                    time.sleep(1)
+                    continue
 
-                for c in df.columns
+                if isinstance(
+                    df.columns,
+                    pd.MultiIndex
+                ):
 
-            ]
+                    df.columns = [
 
-        else:
+                        c[0].lower()
 
-            df.columns = [
+                        for c in df.columns
 
-                str(c).lower()
+                    ]
 
-                for c in df.columns
+                else:
 
-            ]
+                    df.columns = [
 
-        df.dropna(
-            inplace=True
-        )
+                        str(c).lower()
 
-        return df
+                        for c in df.columns
+
+                    ]
+
+                df.dropna(
+                    inplace=True
+                )
+
+                return df
+
+            except Exception as e:
+
+                error_text = str(e)
+
+                if (
+                    "Too Many Requests" in error_text
+                    or
+                    "Rate" in error_text
+                ):
+
+                    wait_time = (
+                        3 + (attempt * 2)
+                    ) + random.uniform(
+                        1,
+                        2
+                    )
+
+                    time.sleep(
+                        wait_time
+                    )
+
+                    continue
+
+                return None
+
+        return None
 
     except:
 
