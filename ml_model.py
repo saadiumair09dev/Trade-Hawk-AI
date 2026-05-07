@@ -1,20 +1,28 @@
 import pandas as pd
 import streamlit as st
+
 from io import StringIO
-from sklearn.ensemble import RandomForestClassifier
+
+from sklearn.ensemble import (
+    RandomForestClassifier
+)
 
 
-# ================= FEATURE ENGINEERING =================
-def prepare_features(df):
+# ================= FEATURE =================
+def prepare_features(
+    df
+):
 
     df = df.copy()
 
     required_cols = [
+
         "close",
         "EMA_9",
         "EMA_21",
         "RSI",
         "volume"
+
     ]
 
     for col in required_cols:
@@ -23,79 +31,156 @@ def prepare_features(df):
 
             return pd.DataFrame()
 
+
+    # numeric cleanup
+    for col in required_cols:
+
+        df[
+            col
+        ] = pd.to_numeric(
+
+            df[
+                col
+            ],
+
+            errors="coerce"
+
+        )
+
+
     # features
-    df["return"] = (
-        df["close"].pct_change()
+    df[
+        "return"
+    ] = df[
+        "close"
+    ].pct_change()
+
+
+    df[
+        "ema_diff"
+    ] = (
+
+        df[
+            "EMA_9"
+        ] -
+
+        df[
+            "EMA_21"
+        ]
+
     )
 
-    df["ema_diff"] = (
-        df["EMA_9"] -
-        df["EMA_21"]
-    )
 
-    df["rsi"] = (
-        df["RSI"]
-    )
+    df[
+        "rsi"
+    ] = df[
+        "RSI"
+    ]
 
-    df["vol"] = (
-        df["volume"]
-    )
+
+    df[
+        "vol"
+    ] = df[
+        "volume"
+    ]
+
 
     # target
-    df["target"] = (
-        df["close"].shift(-1) >
-        df["close"]
-    ).astype(int)
+    df[
+        "target"
+    ] = (
 
-    df = df.dropna()
+        df[
+            "close"
+        ].shift(
+            -1
+        ) >
+
+        df[
+            "close"
+        ]
+
+    ).astype(
+        int
+    )
+
+
+    df.dropna(
+        inplace=True
+    )
 
     return df
 
 
 # ================= TRAIN =================
-@st.cache_resource(ttl=300)
-def train_model_cached(data_json):
+@st.cache_resource(
+    ttl=300
+)
+def train_model_cached(
+    data_json
+):
 
-    df = pd.read_json(
-        StringIO(data_json)
-    )
+    try:
 
-    if (
-        df.empty
-        or len(df) < 20
-    ):
+        df = pd.read_json(
+            StringIO(
+                data_json
+            )
+        )
+
+        if (
+
+            df.empty
+            or len(df) < 50
+
+        ):
+
+            return None, None
+
+
+        features = [
+
+            "return",
+            "ema_diff",
+            "rsi",
+            "vol"
+
+        ]
+
+
+        X = df[
+            features
+        ]
+
+        y = df[
+            "target"
+        ]
+
+
+        model = RandomForestClassifier(
+
+            n_estimators=100,
+
+            random_state=42
+
+        )
+
+
+        model.fit(
+            X,
+            y
+        )
+
+        return model, features
+
+    except:
 
         return None, None
 
-    features = [
-        "return",
-        "ema_diff",
-        "rsi",
-        "vol"
-    ]
 
-    X = df[
-        features
-    ]
-
-    y = df[
-        "target"
-    ]
-
-    model = RandomForestClassifier(
-        n_estimators=100,
-        random_state=42
-    )
-
-    model.fit(
-        X,
-        y
-    )
-
-    return model, features
-
-
-def train_model(df):
+def train_model(
+    df
+):
 
     df = prepare_features(
         df
@@ -105,6 +190,7 @@ def train_model(df):
 
         return None, None
 
+
     data_json = df.to_json()
 
     return train_model_cached(
@@ -113,7 +199,9 @@ def train_model(df):
 
 
 # ================= SINGLE =================
-def predict_next(df):
+def predict_next(
+    df
+):
 
     model, features = train_model(
         df
@@ -123,11 +211,20 @@ def predict_next(df):
 
         return "WAIT", 0
 
+
     df = prepare_features(
         df
     )
 
-    latest = df.iloc[-1:]
+    if df.empty:
+
+        return "WAIT", 0
+
+
+    latest = df.iloc[
+        -1:
+    ]
+
 
     try:
 
@@ -135,18 +232,25 @@ def predict_next(df):
             features
         ]
 
+
         pred = model.predict(
             X_live
         )[0]
+
 
         prob = model.predict_proba(
             X_live
         )[0]
 
+
         confidence = round(
+
             max(prob) * 100,
+
             2
+
         )
+
 
         if pred == 1:
 
@@ -173,23 +277,29 @@ def predict_multi(
 
     previous_signal = None
 
-    for _ in range(steps):
+
+    for _ in range(
+        steps
+    ):
 
         signal, conf = predict_next(
             temp_df
         )
 
+
         label = "😴 Sideways"
 
-        # reversal
+
         if (
+
             previous_signal
             and previous_signal != signal
+
         ):
 
             label = "↩️ Reversal"
 
-        # buy side
+
         if signal == "BUY":
 
             if conf >= 85:
@@ -208,7 +318,7 @@ def predict_multi(
 
                 label = "⚠️ Weak Bullish"
 
-        # sell side
+
         elif signal == "SELL":
 
             if conf >= 85:
@@ -227,28 +337,37 @@ def predict_multi(
 
                 label = "⚠️ Weak Bearish"
 
-        # low confidence
+
         if conf < 50:
 
             label = "😴 Sideways"
 
+
         results.append(
+
             (
                 label,
                 conf
             )
+
         )
+
 
         previous_signal = signal
 
-        # simulate next candle
+
+        # next simulated candle
         if temp_df.empty:
 
             break
 
+
         last_close = temp_df[
             "close"
-        ].iloc[-1]
+        ].iloc[
+            -1
+        ]
+
 
         if signal == "BUY":
 
@@ -268,26 +387,36 @@ def predict_multi(
                 last_close
             )
 
+
         new_row = temp_df.iloc[
             -1:
         ].copy()
+
 
         new_row[
             "close"
         ] = new_close
 
+
         temp_df = pd.concat(
+
             [
                 temp_df,
                 new_row
             ]
+
         )
+
 
     return results
 
 
 # ================= ACCURACY =================
-@st.cache_data(ttl=300)
-def calculate_accuracy(_):
+@st.cache_data(
+    ttl=300
+)
+def calculate_accuracy(
+    _
+):
 
     return 72.5
